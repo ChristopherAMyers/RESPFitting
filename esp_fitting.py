@@ -238,13 +238,15 @@ def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], expone
     ratios = np.round(ratios, 3)
     for n, nuc in enumerate(uniq_nuclei):
         if nuc == 0: continue
-        ratios[:, n] /= Bondi_radii[nuc]
+        ratios[:, n] /= Elements.getRadiiByAtomicNumber(nuc)
+        #ratios[:, n] /= vdw_radii[Elements.int2name(nuc)]
     min_ratios = np.min(ratios, axis=1)
 
     #   find unique ratios and remove trailing digits from rounding
     min_ratios = np.array(['{:.4f}'.format(x) for x in min_ratios])
     unique_ratios_str = sorted(set(min_ratios))
     print( " Identified {:d} unique vdW radii ratios".format(len(unique_ratios_str)))
+    print(unique_ratios_str)
 
     if len(unique_ratios_str) <= 20:
         for ratio in unique_ratios_str:

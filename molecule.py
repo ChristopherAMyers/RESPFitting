@@ -105,7 +105,6 @@ class Molecule():
 
     def __new__(self, file_loc):
         extension = splitext(file_loc)[-1]
-        print("EXTENSION: ", extension)
         if extension == '.pdb':
             return PDBFile(file_loc)
         elif extension == '.xyz':

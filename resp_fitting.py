@@ -1,4 +1,5 @@
 from copy import Error
+import shutil
 import numpy as np
 from simtk.openmm.app import PDBFile
 from simtk.unit import *
@@ -67,14 +68,22 @@ def parse_options(opt_file):
 
     return opts, rem_opts
 
-def create_qchem_job_str(rem_opts, coords, elements, total_chg = 0, spin_mult=1):
+def create_qchem_job_str(options, coords, elements, total_chg = 0, spin_mult=1):
 
-    file_str = "$rem\n"
-    for key in rem_opts:
-        file_str += "  {:20s}  {:20s} \n".format(key, str(rem_opts[key]))
-    file_str += "$end\n"
+    file_str = ""
+    # file_str = "$rem\n"
+    # for key in rem_opts:
+    #     file_str += "  {:20s}  {:20s} \n".format(key, str(rem_opts[key]))
+    # file_str += "$end\n"
+
+    for section, qc_options in options.items():
+        if section == 'resp': continue
+        file_str += '$%s\n' % section
+        for key, value in qc_options.items():
+            file_str += '   {:25s}  {:25s}\n'.format(key, value)
+        file_str += '$end\n\n'
+
     file_str += "$molecule\n"
-
     if isinstance(coords, str):
         file_str += coords + "\n"
     else:
@@ -84,7 +93,7 @@ def create_qchem_job_str(rem_opts, coords, elements, total_chg = 0, spin_mult=1)
     file_str += "$end\n"
     return file_str
 
-def create_qchem_job(opts, scratch, name, esp_points, coords, elements, other_rem_opts, outfile=sys.stdout):
+def create_qchem_job(opts, scratch, name, esp_points, coords, elements, outfile=sys.stdout):
 
     qc_envirn = environ.get('QC', None)
     if not qc_envirn:
@@ -101,12 +110,14 @@ def create_qchem_job(opts, scratch, name, esp_points, coords, elements, other_re
     if opts.optimize_first:
         pass
     else:
-        rem_opts = other_rem_opts.copy()
-        rem_opts['method'] = opts.method
-        rem_opts['basis'] = opts.basis
-        rem_opts['jobtype'] = 'sp'
-        rem_opts['esp_grid'] = str(len(esp_points))
-        rem_opts['sym_ignore'] = 'true'
+        rem_opts = opts.input_sections.copy()
+        rem_opts.pop('resp', None)
+        # rem_opts = other_rem_opts.copy()
+        # rem_opts['method'] = opts.method
+        # rem_opts['basis'] = opts.basis
+        # rem_opts['jobtype'] = 'sp'
+        rem_opts['rem']['esp_grid'] = str(len(esp_points))
+        rem_opts['rem']['sym_ignore'] = 'true'
         ipt_lines = create_qchem_job_str(rem_opts, coords, elements, total_chg=opts.charge)
         with open(input_file, 'w') as file:
             file.write(ipt_lines)
@@ -454,8 +465,8 @@ if __name__ == '__main__':
         print(" ------------------------------------------------------", file=outfile)
         for n in range(mol.getNumFrames()):
             pos = mol.getPositions(asNumpy=True, frame=n)/angstroms
-            esp_points = point_gen.gen_MK_points(elms, pos, outfile=outfile)*angstrom.conversion_factor_to(bohr)
-            (esp_file, energy, charges) = create_qchem_job(opts, scratch_dir, 'frame_{:d}'.format(n), esp_points, pos, elms, other_rem_opts, outfile=outfile)
+            esp_points = point_gen.gen_MK_points(elms, pos, outfile=outfile, intervals=opts.vdw_ratios, density=opts.mk_density)*angstrom.conversion_factor_to(bohr)
+            (esp_file, energy, charges) = create_qchem_job(opts, scratch_dir, 'frame_{:d}'.format(n), esp_points, pos, elms, outfile=outfile)
             esp_file = path.join(scratch_dir, 'frame_{:d}/plot.esp'.format(n))
             qc_esp_files.append(esp_file)
             qc_charges.append(charges)
@@ -470,12 +481,13 @@ if __name__ == '__main__':
         nuclei = [atom.element.atomic_number for atom in mol.topology.atoms()]
 
         print_section("Starting ESP Density Fitting", outfile=outfile)
-        density_fitter = DensityFitting(coords, nuclei, args.esp, charge=opts.charge, lone_pairs=opts.lone_pairs)
+        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs)
         density_fitter.run_fitting()
         print_section("Done with ESP Density Fitting", outfile=outfile)
         #exit()
 
-    #   perform RESP fitting with AmberTools
+    #   check if PDB file is provided. If not, turn off option
+    pdb = None
     if opts.amber_fitting:
         if isinstance(mol, PDBFile):
             pdb = mol
@@ -485,8 +497,11 @@ if __name__ == '__main__':
             pdb = PDBFile(args.pdb)
             pdb._positions = mol._positions
         else:
-            raise Error("PDB files are required for Amber RESP charge fitting")
+            print("ERROR: PDB files are required for Amber RESP charge fitting")
+            opts.amber_fitting = False
 
+    #   perform RESP fitting with AmberTools
+    if pdb is not None:
         coords_all = [mol.getPositions(frame=i, asNumpy=True)/angstrom for i in range(mol.getNumFrames())]
         create_esp_data_file(qc_esp_files, coords_all)
         if args.chg:
@@ -504,6 +519,6 @@ if __name__ == '__main__':
         
     chdir(original_dir)
     final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
-    os.rename(scratch_dir, final_dir_name)
+    shutil.move(scratch_dir, final_dir_name)
     
     

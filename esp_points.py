@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import Elements
 
 class ESPPointGenerator():
     def __init__(self):
@@ -45,8 +46,8 @@ class ESPPointGenerator():
             #   generate sphere points for each element unique type
             scale_point_count = 0
             element_pts = {}
-            radii = [self._BondiRadii.get(x, 2.0)*scale for x in elements]
-            uniq_radii = [self._BondiRadii.get(x, 2.0)*scale for x in uniq_elms]
+            radii = [Elements.getRadiiBySymbol(x, 2.0)*scale for x in elements]
+            uniq_radii = [Elements.getRadiiBySymbol(x, 2.0)*scale for x in uniq_elms]
             nbr_list = self._find_neighbors(elements, coords, radii)
             for i, radius in enumerate(uniq_radii):
                 points = []
