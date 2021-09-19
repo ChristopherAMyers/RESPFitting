@@ -1,12 +1,11 @@
+#!/usr/bin/env python3
 from copy import Error
-import shutil
 import numpy as np
 from simtk.openmm.app import PDBFile
 from simtk.unit import *
 import os
-from options import Options
 from distutils.util import strtobool
-from shutil import copyfile
+from shutil import copyfile, move
 import argparse
 import warnings
 import os.path as path
@@ -15,6 +14,7 @@ import subprocess
 from multiprocessing import cpu_count
 import glob
 
+from options import Options
 from esp_points import ESPPointGenerator
 from density_fitting import DensityFitting
 from molecule import Molecule
@@ -75,9 +75,8 @@ def create_qchem_job_str(options, coords, elements, total_chg = 0, spin_mult=1):
     # for key in rem_opts:
     #     file_str += "  {:20s}  {:20s} \n".format(key, str(rem_opts[key]))
     # file_str += "$end\n"
-
     for section, qc_options in options.items():
-        if section == 'resp': continue
+        if section in ['resp', 'intra_constraints']: continue
         file_str += '$%s\n' % section
         for key, value in qc_options.items():
             file_str += '   {:25s}  {:25s}\n'.format(key, value)
@@ -223,7 +222,7 @@ def create_amber_files(pdb, ihfree=1, ioutopt=1, irstrnt=1, outfile=sys.stdout, 
             pdb.writeModel(pdb.topology, pdb.getPositions(frame=n), file=file)
         
         #   convert from pdb to ac format
-        cmd = 'antechamber -i ' +  pdb_file + ' -fi pdb -o ' + ac_file + ' -fo ac -nc ' + str(int(net_charge))
+        cmd = 'antechamber -i ' +  pdb_file + ' -fi pdb -o ' + ac_file + ' -fo ac -dr no -nc ' + str(int(net_charge))
         print(" Calling Antechamber: ", file=outfile)
         print('\t ' + cmd +  '\n', file=outfile)
         try:
@@ -399,7 +398,7 @@ def print_section(message, length=54, outfile=sys.stdout):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-rem', required=False)
+    parser.add_argument('-ipt', required=False)
     parser.add_argument('-pdb', required=False)
     parser.add_argument('-out', required=False)
     parser.add_argument('-esp', required=False)
@@ -414,8 +413,7 @@ if __name__ == '__main__':
 
     print("STARTING RESP PYTHON PROGRAM", file=outfile)
     #   grep job and Q-Chem options
-    #opts, other_rem_opts = parse_options(args.rem)
-    opts = Options(args.rem)
+    opts = Options(args.ipt)
     #exit()
 
     #   set up scratch directory
@@ -430,9 +428,9 @@ if __name__ == '__main__':
 
     #   copy mol file to scratch and chagne directory
     if args.pdb:
-        args.pdb = os.path.abspath(args.pdb)
+        args.pdb = path.abspath(args.pdb)
     print(" Changing directory to scratch", file=outfile)
-    mol_file_name = os.path.basename(args.mol)
+    mol_file_name = path.basename(args.mol)
     copyfile(mol_file, path.join(scratch_dir, mol_file_name))
     chdir(scratch_dir)
 
@@ -481,10 +479,18 @@ if __name__ == '__main__':
         nuclei = [atom.element.atomic_number for atom in mol.topology.atoms()]
 
         print_section("Starting ESP Density Fitting", outfile=outfile)
-        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs)
+        #   overwrite std.out; density fitting does nto use output file, temp fix.
+        old_std_out = sys.stdout
+        sys.stdout = outfile
+        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'])
         density_fitter.run_fitting()
+        # try:
+        #     density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'])
+        #     density_fitter.run_fitting()
+        # except: 
+        #     print(" DENSITY FITTING HAS FAILED: ", sys.exc_info()[0], file=outfile)
+        sys.stdout = old_std_out
         print_section("Done with ESP Density Fitting", outfile=outfile)
-        #exit()
 
     #   check if PDB file is provided. If not, turn off option
     pdb = None
@@ -497,28 +503,30 @@ if __name__ == '__main__':
             pdb = PDBFile(args.pdb)
             pdb._positions = mol._positions
         else:
-            print("ERROR: PDB files are required for Amber RESP charge fitting")
-            opts.amber_fitting = False
+            out_pdb_file = path.splitext(mol_file_name)[0] + '.pdb'
+            PDBFile.writeFile(mol.getTopology(), mol.getPositions(), open(out_pdb_file, 'w'))
+            pdb = PDBFile(out_pdb_file)
+            pdb._positions = mol._positions
 
     #   perform RESP fitting with AmberTools
     if pdb is not None:
-        coords_all = [mol.getPositions(frame=i, asNumpy=True)/angstrom for i in range(mol.getNumFrames())]
+        coords_all = [pdb.getPositions(frame=i, asNumpy=True)/angstrom for i in range(pdb.getNumFrames())]
         create_esp_data_file(qc_esp_files, coords_all)
         if args.chg:
             #   load in Q-Chem pre-generated charges for fitting analysis
             print(" Loading charge file for analysis only. Q-Chem will NOT be run")
             args.chg = path.join(original_dir, args.chg)
             charges = load_charges(args.chg)
-            charges = np.reshape(charges, (mol.getNumFrames(), mol.topology.getNumAtoms()))
-            info = create_amber_files(mol, outfile=outfile, net_charge=opts.charge, irstrnt=2, init_charges=charges)
+            charges = np.reshape(charges, (pdb.getNumFrames(), pdb.topology.getNumAtoms()))
+            info = create_amber_files(pdb, outfile=outfile, net_charge=opts.charge, irstrnt=2, init_charges=charges)
             call_resp(outfile=outfile, n_stages=1, qinit_file='q_init')
 
         else:
-            create_amber_files(mol, outfile=outfile, net_charge=opts.charge)
+            create_amber_files(pdb, outfile=outfile, net_charge=opts.charge)
             call_resp(outfile=outfile)
         
     chdir(original_dir)
     final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
-    shutil.move(scratch_dir, final_dir_name)
+    move(scratch_dir, final_dir_name)
     
     

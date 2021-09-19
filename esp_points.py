@@ -34,7 +34,7 @@ class ESPPointGenerator():
 
     def gen_MK_points(self, elements, coords, intervals=[], density=5.0, outfile=open(os.devnull, 'w')):
         print("\n Generating ESP Points using Merz-Kollman procedure", file=outfile)
-        
+
         if len(intervals) == 0:
             intervals = [1.4, 1.6, 1.8, 2.0]
         
@@ -46,7 +46,7 @@ class ESPPointGenerator():
             #   generate sphere points for each element unique type
             scale_point_count = 0
             element_pts = {}
-            radii = [Elements.getRadiiBySymbol(x, 2.0)*scale for x in elements]
+            radii =      [Elements.getRadiiBySymbol(x, 2.0)*scale for x in elements]
             uniq_radii = [Elements.getRadiiBySymbol(x, 2.0)*scale for x in uniq_elms]
             nbr_list = self._find_neighbors(elements, coords, radii)
             for i, radius in enumerate(uniq_radii):

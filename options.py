@@ -1,6 +1,6 @@
 from distutils.util import strtobool
 from tokenize import String
-import sys
+from constraints import IntraConstraint
 
 class _KeywordOption():
     def __init__(self, key, var, type=str) -> None:
@@ -21,9 +21,9 @@ class Options():
         self.amber_fitting = True
         self.lone_pairs = False
         self.vdw_ratios = [1.4, 1.6, 1.8, 2.0]
-        self.mk_density = 10
+        self.mk_density = 20
 
-        self.density_fitting = True
+        self.density_fitting = False
         self.lone_pairs = False
         self.n_dens = 1
         self.nh_dens = 1
@@ -43,7 +43,6 @@ class Options():
         if input_file is not None:
             self.input_sections = self._read(input_file)
         else:
-            print("NONE")
             #   no file provided means use the default options
             pass
 
@@ -54,8 +53,39 @@ class Options():
         string = str.replace(string, ',', ' ')
         return [float(x) for x in string.split()]
 
+    def _add_new_section(self, input_dict, section_title):
+        #   'resp' and 'rem' sections are key-value secions
+        if section_title in ['resp', 'rem']:
+            input_dict[section_title] = {}
+        else:
+            input_dict[section_title] = []
+
+    def _add_new_section_line(self, input_dict, section_title, line):
+        ''' Add a new input option: line is assumed to have comments stripped out'''
+        if section_title in ['resp', 'rem']:
+            #   split only to check the number of entries in the line
+            sp = line.replace('=', '').split()
+            if len(sp) < 2:
+                raise ValueError("Invalid line in input file\n %s" % line)
+            option = sp[0]
+            value = line.replace(sp[0], '').lstrip()
+            input_dict[section_title][option] =  value
+        elif section_title == 'intra_constraints':
+            sp = line.split()
+            if len(sp) == 2:
+                value = float(sp[0])
+                mol_idx = int(sp[1])
+                new_constr = IntraConstraint(value, mol_idx)
+                input_dict[section_title].append(new_constr)
+            elif len(sp) == 3:
+                coeff = float(sp[0])
+                atom_idx_list = list(range(int(sp[1]) - 1, int(sp[2])))
+                input_dict[section_title][-1].add_constraint(coeff, atom_idx_list)
+        else:
+            input_dict[section_title].append(line)
+
     def _read(self, input_file):
-        input_sections = {}
+        input_sections = {'resp': {}, 'rem': {}, 'intra_constraints': {}}
         reading_sec = None
         for line in open(input_file, 'r'):     
             line = line.strip()
@@ -64,23 +94,17 @@ class Options():
                     reading_sec = None
                 else:
                     reading_sec = str.lower(line[1:])
-                    input_sections[reading_sec] = {}
-            
+                    self._add_new_section(input_sections, reading_sec)
+
             elif reading_sec is not None:
                 #   skip over comment lines
                 sp_comment = line.split('!')
-                if sp_comment[0] == '!': continue
+                if line.replace(' ', '')[0] == '!': continue
                 #   comments can also be placed at the end of lines
                 if len(sp_comment) == 2:
                     line = sp_comment[0].rstrip()
 
-                #   split only to check the number of entries in the line
-                sp = line.replace('=', '').split()
-                if len(sp) < 2:
-                    raise ValueError("Invalid line in input file\n %s" % line)
-                option = sp[0]
-                value = line.replace(sp[0], '').lstrip()
-                input_sections[reading_sec][option] =  value
+                self._add_new_section_line(input_sections, reading_sec, line)
 
         #   dynamically assign options and convert types if needed
         for option, value in input_sections['resp'].items():

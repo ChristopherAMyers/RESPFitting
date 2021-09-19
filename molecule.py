@@ -57,7 +57,7 @@ class XYZFile():
         res = top.addResidue('mol', chain)
         for n, atom in enumerate(self._atoms):
             elm = element.get_by_symbol(atom)
-            top.addAtom(str(n + 1) + atom, elm, res)
+            top.addAtom(atom + str(n + 1) , elm, res)
 
     def getTopology(self):
         """Get the Topology of the model."""

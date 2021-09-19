@@ -220,7 +220,7 @@ def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], expone
         method_coords = uniq_coords
         method_types = uniq_types
         nuc_to_exp = {1: 2.5, 6: 2.15, 7: 2.17, 8: 2.43, 0:2.20}
-        exponents = np.array([nuc_to_exp[x]*10 for x in uniq_nuclei])
+        exponents = np.array([nuc_to_exp.get(x, 2.00)*10 for x in uniq_nuclei])
     else:
         method_coords = coords
         method_types = types
@@ -246,7 +246,6 @@ def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], expone
     min_ratios = np.array(['{:.4f}'.format(x) for x in min_ratios])
     unique_ratios_str = sorted(set(min_ratios))
     print( " Identified {:d} unique vdW radii ratios".format(len(unique_ratios_str)))
-    print(unique_ratios_str)
 
     if len(unique_ratios_str) <= 20:
         for ratio in unique_ratios_str:
