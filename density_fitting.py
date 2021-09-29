@@ -62,6 +62,8 @@ class DensityFitting():
 
         self.create_bonds()
 
+        self._exp_restraints = {1: 2.50, 6: 2.15, 7: 2.35, 8: 2.60}
+
     def create_bonds(self):
         self._bonded_to = [[] for i in range(len(self._coords_in))]
         for i, coord_i in enumerate(self._coords_in):
@@ -277,7 +279,7 @@ class DensityFitting():
                 n_lp_constr = 0
                 for n in lp_idx[1:]:
                     n_lp_constr += 1
-                    for shift in []:
+                    for shift in [0, dim]:
                         jac_vec = np.zeros(dim*2)
                         jac_vec[lp_idx[0] + shift] = 1
                         jac_vec[n + shift] = -1
@@ -353,9 +355,8 @@ class DensityFitting():
         '''
         dim = int(len(x)/2)
         coeff = np.array(x[0:dim])
-        #logExp = x[dim:]
-        #exp = np.exp(logExp)
         exp = x[dim:]
+        deriv = np.zeros_like(x)
 
         esp_res = calc_chelp_coeff(esp_norms, esp_fit.QM_esp_elec, self._numE, exponents=exp, coeff_deriv=calc_d, exp_deriv=calc_d, coeff=coeff)
         func_eval = esp_res['rms'] / esp_fit.sum_pot_sq
@@ -376,18 +377,22 @@ class DensityFitting():
                 sqrt_rest[n] = np.sqrt(q[n]**2 + self._resp_b**2)
                 func_eval += self._resp_a*(sqrt_rest[n] - self._resp_b)
 
-        #   hessian matrix cost function
-        # corr_wt = 10**np.loadtxt('tmp')*0
-        # G_inv_coeff = np.linalg.inv(esp_res['G_mat']) @ coeff
-        # cost = 0.5 * coeff @ G_inv_coeff
-        # #print("COST: ", cost)
-        # func_eval += corr_wt * cost 
+        # sqrt_exp_resp = np.zeros_like(exp)
+        #print("BEFORE: ", func_eval)
+        # for n, e in enumerate(exp):
+        #     e_ref = self._exp_restraints.get(nuclei[n], 0)
+        #     if e_ref == 0: continue
+        #     e_diff = e - e_ref
+        #     sqrt_exp_resp[n] = np.sqrt(e_diff**2 + self._resp_b**2)
+        #     func_eval += self._resp_a*(sqrt_exp_resp[n] - self._resp_b)*0
+        #     if calc_d:
+        #         deriv[dim + n] += e_diff*self._resp_a/sqrt_exp_resp[n]*0
+        #print("AFTER: ", func_eval)
 
         #   derivative terms
-        deriv = None
         if calc_d:
             #   derivative of ESP fitting function
-            deriv = np.append(esp_res['coeff_deriv'], esp_res['exp_deriv'])/ esp_fit.sum_pot_sq
+            deriv += np.append(esp_res['coeff_deriv'], esp_res['exp_deriv'])/ esp_fit.sum_pot_sq
 
             #   derivative of lone pair restraints
             for n in [idx for idx, nuc in enumerate(nuclei) if nuc == 0]:
@@ -399,8 +404,7 @@ class DensityFitting():
                     for idx in atom_idx:
                         deriv[idx] -= q[n]*self._resp_a/sqrt_rest[n]
 
-            #   hessian matrix cost function
-            # deriv[:dim] += G_inv_coeff * corr_wt
+
             deriv *= 100
 
         #   scale function for better search performance with scipy
@@ -419,6 +423,7 @@ class DensityFitting():
             return func_eval
 
     def _test_numerical_derivative(self, x0, args):
+        ''' Test actual vs. numerical derivative of ESP_Min()'''
         eps = 1E-5
         fun, deriv = self.ESP_Min(x0, *args)
         for n in range(len(x0)):
@@ -431,7 +436,7 @@ class DensityFitting():
             fm = self.ESP_Min(xm, *args[:-1], calc_d=False)
 
             num_deriv = (fp - fm)/(2*eps)
-            num_deriv = (fp + fm - 2*fun)/(eps*eps)
+            #num_deriv = (fp + fm - 2*fun)/(eps*eps)
             print(" {:10.5f}  {:10.5f}  {:10.5f}".format(x0[n], deriv[n], num_deriv))
         exit()
 
@@ -511,17 +516,23 @@ class DensityFitting():
                 jac=True,
                 )
         elif self.fitting_method == 'bfgs':
-            print("\n Starting SciPy L-BFGS-B minimization routine ")
-            lagrangian = CostLagrangian(self.ESP_Min, init_guess, args, constraints, 10)
-            res = minimize(
-                lagrangian.min_func,
-                lagrangian.get_guess(),
-                method="l-bfgs-b",
-                options={'disp':True, 'maxiter':500, 'gtol': 1E-2, 'ftol': 1E-14},
-                args=args, 
-                callback=self.ESP_Min_callback,
-                jac=True,
-                )
+            print("\n Starting SciPy L-BFGS-B minimization with cost-function constraints")
+            for n in range(4):
+                lagrangian = CostLagrangian(self.ESP_Min, init_guess, args, constraints, 10)
+                res = minimize(
+                    lagrangian.min_func,
+                    lagrangian.get_guess(),
+                    method="l-bfgs-b",
+                    options={'disp':False, 'maxiter':1000, 'gtol': 1E-2, 'ftol': 1E-14},
+                    args=args, 
+                    callback=self.ESP_Min_callback,
+                    jac=True,
+                    )
+                #print(res)
+                init_guess = self._best_guess
+                if res.success or 'ITERATIONS REACHED LIMIT' in res.message: break
+                print(" BFGS says: " + res.message)
+                print(" Resetting BFGS memory") 
         else: raise ValueError(" Fitting function must be 'SLSQP' or 'BFGS'")
 
         #   overwrite with best guess found through the entire searhc process

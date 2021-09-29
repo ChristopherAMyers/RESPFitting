@@ -63,10 +63,11 @@ class CostLagrangian():
         constr_vals = np.zeros(self.n_constr)
         for n, constr in enumerate(self.constraints):
             constr_vals[n] = constr['fun'](x, constr['args'])
-        f += self.cost * constr_vals @ constr_vals
+        f += self.cost * np.sum(constr_vals**2)
+        #print(self.cost * np.sum(constr_vals**2))
 
         deriv = np.zeros_like(x_in)
-        deriv[0:self.dim*2] = df + self.constr_mat.T @ constr_vals*self.cost
+        deriv[0:self.dim*2] = df + 2*self.constr_mat.T @ constr_vals*self.cost
 
         return f, deriv
 
