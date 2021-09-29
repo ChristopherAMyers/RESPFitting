@@ -1,6 +1,12 @@
 import numpy as np
+from numpy.lib.arraysetops import unique
 from numpy.linalg import norm
 from math import ceil, pi, floor, sin, cos, sqrt
+import sys
+from os import devnull
+from numpy.linalg.linalg import eigvals
+
+from simtk.openmm.app import element
 
 import Elements
 
@@ -152,16 +158,19 @@ def calc_chelp_coeff(norms, QM_esp_elec, n_elec, coeff=None, types=None, exponen
         coeff = -Ginv_e + lamb * Ginv @ c
 
     res = {'rms': None, 'coeff_deriv': None, 'exp_deriv': None}
+    res['G_mat'] = G_mat
     res['rms'] = coeff @ G_mat @ coeff + 2*e_vec @ coeff + np.sum(QM_esp_elec**2)
     res['coeff'] = coeff
 
     #   derivative of RMS w.r.t. electron coefficients
     if coeff_deriv:
         res['coeff_deriv'] = 2*G_mat @ coeff + 2*e_vec
+        
     #   derivative of RMS w.r.t. electron density exponents
     if exp_deriv:
         if exponents is not None:
-            d_pot = 0.5 - 0.5*norms*unit_potential + 0.25*a_R*exp_ar
+            #d_pot_2 = 0.5 - 0.5*norms*unit_potential + 0.25*a_R*exp_ar
+            d_pot = 1.0 - norms*unit_potential - 0.5*exp_ar
             deriv = np.zeros(len(exponents))
             for a, pop in enumerate(coeff):
                 G_prime = unit_potential.T @ d_pot[:, a]
@@ -172,8 +181,7 @@ def calc_chelp_coeff(norms, QM_esp_elec, n_elec, coeff=None, types=None, exponen
     #print("EXP: ", exponents)
     return res
 
-#def chelp_coeff(points, QM_esp_elec, coords, n_elec, QM_pot_sq = None, QM_pot_sq_elec = None, types = [], nuclei = [], exponents=None, coeff=None):
-def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], exponents=None, coeff=None):
+def chelp_coeff(points, esp_fit, coords, n_elec, nuclei, types = [], exponents=None, coeff=None, print_results=True):
     '''
     Calculate ChElPG equvilant for electronic coefficients
     Note: Assumes that QM_esp_elec is the ELECTRON potential
@@ -219,8 +227,7 @@ def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], expone
         print(" Consolidating similar nuclei into unique centers")
         method_coords = uniq_coords
         method_types = uniq_types
-        nuc_to_exp = {1: 2.5, 6: 2.15, 7: 2.17, 8: 2.43, 0:2.20}
-        exponents = np.array([nuc_to_exp.get(x, 2.00)*10 for x in uniq_nuclei])
+        exponents = np.array([Elements.getExponentByAtomicNumber(x) for x in uniq_nuclei])
     else:
         method_coords = coords
         method_types = types
@@ -233,14 +240,25 @@ def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], expone
     coeff = all_res['coeff']
 
     #   calcualte vdW ratios possible used
-    uniq_norms = norm(points[:, None] - uniq_coords, axis=-1)
-    ratios = uniq_norms/1.889725989
+    # uniq_norms = norm(points[:, None] - uniq_coords, axis=-1)
+    # ratios = uniq_norms/1.889725989
+    # ratios = np.round(ratios, 3)
+    # for n, nuc in enumerate(uniq_nuclei):
+    #     if nuc == 0: continue
+    #     ratios[:, n] /= Elements.getRadiiByAtomicNumber(nuc)
+    # min_ratios = np.min(ratios, axis=1)
+
+
+    #   calcualte vdW ratios possible used
+    ratio_nuclei = [nuc for n, nuc in enumerate(uniq_nuclei) if nuc > 0]
+    ratio_coords = [uniq_coords[n] for n, nuc in enumerate(uniq_nuclei) if nuc > 0]
+    ratio_norms = norm(points[:, None] - ratio_coords, axis=-1)
+    ratios = ratio_norms/1.889725989
     ratios = np.round(ratios, 3)
-    for n, nuc in enumerate(uniq_nuclei):
-        if nuc == 0: continue
+    for n, nuc in enumerate(ratio_nuclei):
         ratios[:, n] /= Elements.getRadiiByAtomicNumber(nuc)
-        #ratios[:, n] /= vdw_radii[Elements.int2name(nuc)]
     min_ratios = np.min(ratios, axis=1)
+
 
     #   find unique ratios and remove trailing digits from rounding
     min_ratios = np.array(['{:.4f}'.format(x) for x in min_ratios])
@@ -274,32 +292,34 @@ def chelp_coeff(points, esp_fit, coords, n_elec, types = [], nuclei = [], expone
         rmsd = np.round(rmsd, 5)
 
     #   if nuclei are provided, then print results
-    if len(nuclei) != 0:
-        print(" Populations:")
-        uniq_nuclei = nuclei[uniq_coord_idx]
+    if print_results: out = sys.stdout
+    else: out = open(devnull, 'w')
+    print(" Populations:", file=out)
+    uniq_nuclei = nuclei[uniq_coord_idx]
 
-        s_types_idx = np.where(uniq_types == 's')[0]
-        s_pops = []
-        p_pops = []
-        s_dipole = np.array([0., 0., 0.])
-        for i, s_idx in enumerate(s_types_idx):
-            center = uniq_coords[s_idx]
-            nuc = uniq_nuclei[i]
-            elm = Elements.int2name(nuc)
-            if len(coeff) == len(uniq_coords):
-                center_pop = coeff[i]
-            else:
-                center_pop = np.sum(coeff[x] for x in uniq_to_all[i])
-            if uniq_types[i][0] == 'p':
-                p_pops.append(center_pop)
-                print(" {:3d}  {:3s}  {:3s}              {:12.6f} ".format(i + 1, elm, uniq_types[i], center_pop))
-            else:
-                s_pops.append(center_pop)
-                s_dipole += center * (nuc - center_pop)/0.3934303    # units are in Debye
-                print(" {:3d}  {:3s}  {:3s}  {:12.6f} ".format(i + 1, elm, uniq_types[i], nuc - center_pop))
-        
-        print(" Sum of atomic charges = {:12.6f}".format(np.sum(uniq_nuclei - s_pops)))
-        print(" s-dipole moment: {:8.3f} (X {:8.3f} Y {:8.3f} Z{:8.3f}) Debye\n".format(norm(s_dipole), *tuple(s_dipole)))
+    s_types_idx = np.where(uniq_types == 's')[0]
+    s_pops = []
+    p_pops = []
+    s_dipole = np.array([0., 0., 0.])
+    for i, s_idx in enumerate(s_types_idx):
+        center = uniq_coords[s_idx]
+        nuc = uniq_nuclei[i]
+        elm = Elements.int2name(nuc)
+        if len(coeff) == len(uniq_coords):
+            center_pop = coeff[i]
+        else:
+            center_pop = np.sum(coeff[x] for x in uniq_to_all[i])
+        if uniq_types[i][0] == 'p':
+            p_pops.append(center_pop)
+            print(" {:3d}  {:3s}  {:3s}              {:12.6f} ".format(i + 1, elm, uniq_types[i], center_pop), file=out)
+        else:
+            s_pops.append(center_pop)
+            s_dipole += center * (nuc - center_pop)/0.3934303    # units are in Debye
+            print(" {:3d}  {:3s}  {:3s}  {:12.6f} ".format(i + 1, elm, uniq_types[i], nuc - center_pop), file=out)
+    
+    print(" Sum of atomic charges = {:12.6f}".format(np.sum(uniq_nuclei - s_pops)), file=out)
+    print(" s-dipole moment: {:8.3f} (X {:8.3f} Y {:8.3f} Z{:8.3f}) Debye\n".format(norm(s_dipole), *tuple(s_dipole)), file=out)
+
 
     res = {'s_pops': np.array(s_pops), 'p_pops': np.array(p_pops), 'esp_norms': norms, 'vdw_ratios': min_ratios}
     res.update(all_res)

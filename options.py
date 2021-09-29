@@ -20,6 +20,8 @@ class Options():
         self.charge = 0
         self.amber_fitting = True
         self.lone_pairs = False
+        self.lone_pairs_dist = 0.40
+        self.lone_pairs_rest = 0.0
         self.vdw_ratios = [1.4, 1.6, 1.8, 2.0]
         self.mk_density = 20
 
@@ -34,6 +36,8 @@ class Options():
         self._keywords['optimize'       ] = strtobool
         self._keywords['density_fitting'] = strtobool
         self._keywords['lone_pairs'     ] = strtobool
+        self._keywords['lone_pairs_dist'] = float
+        self._keywords['lone_pairs_rest'] = float
         self._keywords['n_dens'         ] = int
         self._keywords['nh_dens'        ] = int
         self._keywords['vdw_ratios'     ] = self.strToFloatList

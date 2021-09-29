@@ -1,7 +1,10 @@
 import numpy as np
+from simtk.openmm.app import element
 import Elements
 from esp_fitting import *
 from scipy.optimize import minimize
+
+#cost_wt = 10**np.loadtxt('tmp')
 
 class Density:
     def __init__(self, 
@@ -22,20 +25,24 @@ class Density:
         self.type = type
 
 class DensityFitting():
-    def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.0005, resp_b=0.10, intra_constraints=None) -> None:
+    def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.0005, resp_b=0.10, intra_constraints=None, lone_pair_dist=0.40) -> None:
+        self._ANG_TO_BOHR = 1.8897259885789
+
         self._n_dens = 1
         self._nh_dens = 1
         self._n_atoms = 0
         self._numE = np.sum(nuclei_in) - charge
         self._n_atoms = len(nuclei_in)
         self._nuclei_in = np.copy(nuclei_in)
-        self._coords_in = np.copy(coords_in)*1.889725989
+        self._coords_in = np.copy(coords_in)*self._ANG_TO_BOHR
         self._atom_map = []
         self._use_lone_pairs = lone_pairs
         self._lone_pair_k = lone_pair_k
+        self._lone_pair_dist = lone_pair_dist*self._ANG_TO_BOHR
         self._resp_a = resp_a
         self._resp_b = resp_b
         self._intra_constraints = intra_constraints
+        self._bonded_to = []
 
         #   used to communicate results
         self._current_esp_rrms = None
@@ -45,12 +52,29 @@ class DensityFitting():
         self._old_x = None
         self._old_f = None
         self._current_x_diff = None
+        self._best_guess = None
+        self._best_func = 1E50
 
         #   esp data file
         self._esp_file = esp_file
 
+        self.create_bonds()
+
+    def create_bonds(self):
+        self._bonded_to = [[] for i in range(len(self._coords_in))]
+        for i, coord_i in enumerate(self._coords_in):
+            for j, coord_j in enumerate(self._coords_in):
+                if i == j: continue
+                if self._nuclei_in[i] < 0 or self._nuclei_in[j] < 0: continue
+                dist = np.linalg.norm(coord_i - coord_j)
+                if 1 in [self._nuclei_in[i], self._nuclei_in[j]]:
+                    dist_to_accept = 1.20*self._ANG_TO_BOHR
+                else:
+                    dist_to_accept = 1.60*self._ANG_TO_BOHR
+                if dist <= dist_to_accept:
+                    self._bonded_to[i].append(j)
     
-    def create_lone_pairs(self, index, coords, nuclei, lp_dist=0.40):
+    def create_lone_pairs(self, index, coords, nuclei, lp_dist=0.80):
 
         new_coords = []
 
@@ -58,27 +82,39 @@ class DensityFitting():
         nuc_i = nuclei[index]
         i = index
         if nuc_i not in [7, 8]: return new_coords
-        bonds = []
-        for j, nuc_j in enumerate(nuclei):
-            if i == j: continue
-            dist = np.linalg.norm(coords[i] - coords[j])
-            if nuc_j == 1 and dist < 1.2*1.88973:
-                bonds.append(j)
-            elif nuc_j > 1 and dist < 1.7*1.88973:
-                bonds.append(j)
+        bonds = self._bonded_to[index]
                 
         #   nitrogen bisector
         if nuc_i == 7 and len(bonds) == 2:
             r1, r2, r3 = coords[i], coords[bonds[0]], coords[bonds[1]]
             x = r1 - (r2 + r3)*0.5
             x = x/np.linalg.norm(x)
-
             new_coords.append(r1 + x*lp_dist)
+
+        #   oxygen bisector
+        if nuc_i == 8 and len(bonds) == 1:
+            r1, r2 = coords[i], coords[bonds[0]]
+            x = r2 - r1
+            x = x/np.linalg.norm(x)
+            heavy_2 = [x for x in self._bonded_to[bonds[0]] if self._nuclei_in[x] > 1 and x != index]
+            print("HEAVY_2: ", heavy_2)
+            if len(heavy_2) != 2:
+                print(" WARNING: can not add lone-pair to O%d" % index)
+                return new_coords
+            for r3 in (coords[heavy_2[0]], coords[heavy_2[1]]):
+                y = r3 - r1
+                z = np.cross(x, y)
+                z = z/np.linalg.norm(z)
+                y = np.cross(z, x)
+
+                p = r1 + (np.cos(110*np.pi/180)*x + np.sin(110*np.pi/180)*y)*lp_dist
+                new_coords.append(p)
 
         return new_coords
 
-    def assign_densities(self, coords, nuclei, add_lone_pairs=False, lp_dist=0.40, p_base_only=False):
+    def assign_densities(self, coords, nuclei, add_lone_pairs=False, p_base_only=False):
         print(" Assigning Atomic Densities")
+        print(" Adding lone pairs with distance {:.3f} ang.".format(self._lone_pair_dist/self._ANG_TO_BOHR))
         num_dens = 0
         num_p_gauss = 0
         atoms = [Elements.int2name(x) for x in nuclei]
@@ -99,7 +135,7 @@ class DensityFitting():
             else:
                 lone_pairs = []
                 if add_lone_pairs:
-                    lone_pairs = self.create_lone_pairs(i, coords, nuclei, lp_dist=lp_dist)
+                    lone_pairs = self.create_lone_pairs(i, coords, nuclei, lp_dist=self._lone_pair_dist)
 
                 #   centered on nuclei
                 for n in range(max(self._n_dens - 1*(len(lone_pairs) > 0), 1)):
@@ -134,10 +170,14 @@ class DensityFitting():
 
         print(' -----------------------------------------------------------------------')
         print("                     ***  Density Centers ***")
-        print(" {:>6s}  {:>6s}  {:>6s}  {:>3s}  {:>4s}  {:>10}  {:>10}  {:>10}".format('N', 'AtomID', 'CentID', 'Elm', 'Type', 'X (au)', 'Z (au)', 'Z (au)'))
+        print(" {:>6s}  {:>6s}  {:>6s}  {:>3s}  {:>4s}  {:>10}  {:>10}  {:>10}".format('N', 'AtomID', 'CentID', 'Elm', 'Type', 'X (Ang)', 'Y (Ang)', 'Z (Ang)'))
         print(' -----------------------------------------------------------------------')
+        #print(len(density_list))
+        #print("")
         for n, g in enumerate(density_list):
-            print(" {:6d}  {:6d}  {:6d}  {:3s}  {:4s}  {:10.4f}  {:10.4f}  {:10.4f}".format(n+1, g.atom_id, g.center_id, Elements.int2name(g.element), g.type, g.center[0], g.center[1], g.center[2]))
+            #g.center /= self._ANG_TO_BOHR
+            #print(Elements.int2name(g.element), g.center[0], g.center[1], g.center[2])
+            print(" {:6d}  {:6d}  {:6d}  {:3s}  {:4s}  {:10.4f}  {:10.4f}  {:10.4f}".format(n+1, g.atom_id, g.center_id, Elements.int2name(g.element), g.type, g.center[0]/self._ANG_TO_BOHR, g.center[1]/self._ANG_TO_BOHR, g.center[2]/self._ANG_TO_BOHR))
         print(' -----------------------------------------------------------------------')
         return density_list
 
@@ -164,6 +204,11 @@ class DensityFitting():
                 each dictionary has the keys 'type', 'fun', 'jac', and 'args'
 
         '''
+        print(" -----------------------------------------------------------------")
+        print("              Adding cosntraints to the system")
+        print(" -----------------------------------------------------------------")
+
+
         constraints = []
         dim = int(len(guess)/2)
         guess_exp = guess[dim:]
@@ -197,7 +242,7 @@ class DensityFitting():
         #   add exponent constraints for each unique type
         unique_sigs = set(signatures)
         for uniq in unique_sigs:
-            if uniq[1] in ['hydro', 'core']:
+            if uniq[1] in ['core']:
             #if uniq[1] in []:
                 base_idx = None
                 for n, sig in enumerate(signatures):
@@ -208,56 +253,97 @@ class DensityFitting():
                             jac_vec = np.zeros(dim*2)
                             jac_vec[base_idx + dim] = 1
                             jac_vec[n + dim] = -1
-                            constraints.append({
-                                'type': 'eq',
-                                'fun': lambda x, jac_vec: np.dot(jac_vec, x),
-                                'jac': lambda x, jac_vec: jac_vec,
-                                'args': [jac_vec.copy()]
-                            })
+                            constraints.append(self.get_linear_constraint(jac_vec, 0.0))
 
         #   fix core populations
         for n in range(dim):
             if n in core_idx_list:
                 jac_vec = np.zeros(dim*2)
                 jac_vec[n] = 1
-                constraints.append({
-                    'type': 'eq',
-                    'fun': lambda x, jac_vec: np.dot(jac_vec, x) - 2.0,
-                    'jac': lambda x, jac_vec: jac_vec,
-                    'args': [jac_vec.copy()]
-                })
+                constraints.append(self.get_linear_constraint(jac_vec, 2.0))
 
         #   total electron constraint
+        print(" Applying 1 total charge constraint to the entire system")
         jac_vec = np.zeros(dim*2)
         jac_vec[0:dim] = 1
-        constraints.append({
-            'type': 'eq',
-            'fun': lambda x, jac_vec: np.dot(jac_vec, x) - self._numE,
-            'jac': lambda x, jac_vec: jac_vec,
-            'args': [jac_vec.copy()]
-        })
+        constraints.append(self.get_linear_constraint(jac_vec, self._numE))
+
+        #   lone pair constraints
+        for i, sites in enumerate(self._atom_map):
+            lp_idx = [n for n in sites if all_nuclei[n] == 0]
+            if len(lp_idx) > 1:
+                n_lp_constr = 0
+                for n in lp_idx[1:]:
+                    n_lp_constr += 1
+                    for shift in []:
+                        jac_vec = np.zeros(dim*2)
+                        jac_vec[lp_idx[0] + shift] = 1
+                        jac_vec[n + shift] = -1
+                        constraints.append(self.get_linear_constraint(jac_vec, 0.0))
+                print(" Applying %d lone-pair population constraints with host site O%d" % (n_lp_constr, (i+1)))
+                print(" Applying %d lone-pair exponent constraints with host site O%d" % (n_lp_constr, (i+1)))
+
+        #   equivilant hydrogens from methyl and amine groups
+        for i, bonds in enumerate(self._bonded_to):
+            elm_i = self._nuclei_in[i]
+            hydro_atom_idx = [x for x in bonds if Elements.int2name(self._nuclei_in[x]) == 'H']
+            n_hydro = len(hydro_atom_idx)
+            if (elm_i == 6 and n_hydro == 3) or (elm_i == 7 and n_hydro == 2):
+                for n in range(n_hydro):
+                    #   first hydrogen is the reference atom
+                    if n == 0: continue
+                    jac_vec = np.zeros(dim*2)
+                    #   density population constraints
+                    for site_idx in self._atom_map[hydro_atom_idx[0]]:
+                        jac_vec[site_idx] = -1
+                    for site_idx in self._atom_map[hydro_atom_idx[n]]:
+                        jac_vec[site_idx] = 1
+                    constraints.append(self.get_linear_constraint(jac_vec, 0.0))
+                    #   density exponents constraints
+                    for site_idx in self._atom_map[hydro_atom_idx[0]]:
+                        jac_vec[dim + site_idx] = -1
+                    for site_idx in self._atom_map[hydro_atom_idx[n]]:
+                        jac_vec[dim + site_idx] = 1
+                    constraints.append(self.get_linear_constraint(jac_vec, 0.0))
+
+                if elm_i == 6:
+                    atom_type, group_name = "C", "methyl"
+                elif elm_i == 7:
+                    atom_type, group_name = "N", "amine"
+                print(" Identified %s group:" % group_name)
+                print(" \t{:s}{:<2d} with site index {:2d}".format(atom_type, i + 1, self._atom_map[i][0]))
+                for n in hydro_atom_idx:
+                    print(" \tH{:<2d} with site index {:2d}".format(n + 1, self._atom_map[n][0]))
+                print(" Applying %d intra-molecular charge constraints" % (n_hydro - 1))
+                print(" Applying %d intra-molecular exponent constraints\n" % (n_hydro - 1))
+
+
 
         #   intramoleuclar constraints
-        if True:
-            for constr in self._intra_constraints:
-                total_nuclei = 0.0
-                jac_vec = np.zeros(dim*2)
-                #   convert from atom constraints to total density on each site
-                for constr_idx, value in constr.constr_dict.items():
-                    center_idx = [n for n in range(len(atom_ids)) if atom_ids[n] == constr_idx]
-                    for idx in center_idx:
-                        jac_vec[idx] = value
-                    total_nuclei += all_nuclei[center_idx[0]]
-                constraints.append({
+        print(" Applying %d user defined intra-molecular charge constraints" % len(self._intra_constraints))
+        for constr in self._intra_constraints:
+            total_nuclei = 0.0
+            jac_vec = np.zeros(dim*2)
+            #   convert from atom constraints to total density on each site
+            for constr_idx, value in constr.constr_dict.items():
+                center_idx = [n for n in range(len(atom_ids)) if atom_ids[n] == constr_idx]
+                for idx in center_idx:
+                    jac_vec[idx] = value
+                total_nuclei += all_nuclei[center_idx[0]]
+            constraints.append(self.get_linear_constraint(jac_vec, (total_nuclei - constr.charge)))
+        
+        
+        print(" \n\n Total number of cosntraints: {:d}".format(len(constraints)))
+        print(" -----------------------------------------------------------------\n")
+        return constraints
+
+    def get_linear_constraint(self, jac_vec, constr_val):
+        return {
                     'type': 'eq',
-                    'fun': lambda x, jac_vec: np.dot(jac_vec, x) - (total_nuclei - constr.charge),
+                    'fun': lambda x, jac_vec: np.dot(jac_vec, x) - constr_val,
                     'jac': lambda x, jac_vec: jac_vec,
                     'args': [jac_vec.copy()]
-                })
-        
-
-        print(" Applying {:d} constraints".format(len(constraints)))
-        return constraints
+                }
 
     def ESP_Min(self, x, esp_norms, esp_fit, nuclei, calc_d):
         '''
@@ -265,8 +351,9 @@ class DensityFitting():
         '''
         dim = int(len(x)/2)
         coeff = np.array(x[0:dim])
-        logExp = x[dim:]
-        exp = np.exp(logExp)
+        #logExp = x[dim:]
+        #exp = np.exp(logExp)
+        exp = x[dim:]
 
         esp_res = calc_chelp_coeff(esp_norms, esp_fit.QM_esp_elec, self._numE, exponents=exp, coeff_deriv=calc_d, exp_deriv=calc_d, coeff=coeff)
         func_eval = esp_res['rms'] / esp_fit.sum_pot_sq
@@ -287,11 +374,19 @@ class DensityFitting():
                 sqrt_rest[n] = np.sqrt(q[n]**2 + self._resp_b**2)
                 func_eval += self._resp_a*(sqrt_rest[n] - self._resp_b)
 
+        #   hessian matrix cost function
+        # corr_wt = 10**np.loadtxt('tmp')*0
+        # G_inv_coeff = np.linalg.inv(esp_res['G_mat']) @ coeff
+        # cost = 0.5 * coeff @ G_inv_coeff
+        # #print("COST: ", cost)
+        # func_eval += corr_wt * cost 
+
         #   derivative terms
         deriv = None
         if calc_d:
             #   derivative of ESP fitting function
             deriv = np.append(esp_res['coeff_deriv'], esp_res['exp_deriv'])/ esp_fit.sum_pot_sq
+            #deriv[dim:] *=0
 
             #   derivative of lone pair restraints
             for n in [idx for idx, nuc in enumerate(nuclei) if nuc == 0]:
@@ -303,14 +398,39 @@ class DensityFitting():
                     for idx in atom_idx:
                         deriv[idx] -= q[n]*self._resp_a/sqrt_rest[n]
 
-            deriv[dim:] *= exp
+            #   hessian matrix cost function
+            # deriv[:dim] += G_inv_coeff * corr_wt
+            deriv *= 100
+
+        #   scale function for better search performance with scipy
+        func_eval *= 100
+        
 
         #   updates for callback
         self._current_func_eval = func_eval
         self._current_esp_rrms = esp_res['rms'] / esp_fit.sum_pot_sq
         self._current_deriv = deriv
 
-        return (func_eval, deriv)
+        if calc_d:
+            return (func_eval, deriv)
+        else:
+            return func_eval
+
+    def _test_numerical_derivative(self, x0, args):
+        eps = 1E-5
+        fun, deriv = self.ESP_Min(x0, *args)
+        for n in range(len(x0)):
+            xp = np.copy(x0)
+            xp[n] += eps
+            xm = np.copy(x0)
+            xm[n] -= eps
+
+            fp = self.ESP_Min(xp, *args[:-1], calc_d=False)
+            fm = self.ESP_Min(xm, *args[:-1], calc_d=False)
+
+            num_deriv = (fp - fm)/(2*eps)
+            print(" {:10.5f}  {:10.5f}  {:10.5f}".format(x0[n], deriv[n], num_deriv))
+        exit()
 
     def run_fitting(self):
         density_list = self.assign_densities(self._coords_in, self._nuclei_in, self._use_lone_pairs)
@@ -326,8 +446,9 @@ class DensityFitting():
 
         print("\n Performing ChElP fitting BEFORE optimization: ")
         init_chelp_fit = chelp_coeff(esp_fit.points, \
-            esp_fit, centers, self._numE, types = pol_types, nuclei=all_nuclei)
+            esp_fit, centers, self._numE, all_nuclei, types = pol_types)
         esp_norms_center = init_chelp_fit['esp_norms']
+        #exit()
 
         #   re-map esp_norms to the dimensions of the number of densities
         esp_norms_density = np.empty((esp_norms_center.shape[0], dim))
@@ -354,7 +475,7 @@ class DensityFitting():
                 val = init_chelp_fit['s_pops'][dens.center_id]
                 ng = num_centers[dens.center_id]
                 init_guess_coeff[n] = val/ng
-                init_guess_exp[n] = np.linspace(0.7, 2.8, ng)[np.mod(n, ng)]
+                init_guess_exp[n] = Elements.getExponentByAtomicNumber(dens.element)
         init_guess = np.ndarray.flatten(np.array([init_guess_coeff, init_guess_exp]))
 
         #   bounds
@@ -362,55 +483,61 @@ class DensityFitting():
         for n in range(len(init_guess_coeff)):
             bounds.append((0, None))
         for n in range(len(init_guess_exp)):
-            bounds.append((-1.7, 9.5))
+            bounds.append((0.20, 20.0))
 
         #   constraints
         constraints = self.get_SLSQP_constrains(density_list, init_guess)
 
         #   required arguments for fitting function
         args = (esp_norms_density, esp_fit, all_nuclei, True)
-      
+        
+        # for elm in self._atom_map:
+        #     print(elm)
+        # exit()
+
         #   run minimization routine
+        print("\n Starting SLSQP minimization routine ")
         self.ESP_Min(init_guess, *args)
         self.ESP_Min_callback(init_guess, override=True)
         res = minimize(self.ESP_Min, init_guess, 
                         args=args, 
                         callback=self.ESP_Min_callback,
                         method="SLSQP",
+                        options={'disp':False, 'maxiter':500, 'ftol': 1e-6},
+                        #method="trust-constr",
+                        #options={'disp':True, 'maxiter':5000, 'verbose': 3},
                         jac=True,
                         bounds=bounds,
                         constraints = constraints,
-                        options={'disp':False, 'maxiter':500, 'ftol': 1e-6})
-        self.ESP_Min_callback(res.x, override=True)
+                        )
+        #   overwrite with best guess found through the entire searhc process
+        res.x = self._best_guess
+        #self._test_numerical_derivative(res.x, args)
+
         print(" ---------------------------------------------------------------------")
         print("        #### " + res.message + " #### ")
+        print(" Using best guess found:")
+        self.ESP_Min_callback(res.x, override=True)
+        print(" ---------------------------------------------------------------------")
 
         coeff = res.x[0:dim]
         exp_list = np.exp(res.x[dim:])
+        exp_list = res.x[dim:]
         for n, c in enumerate(coeff):
             density_list[n].coeff = c
             density_list[n].exp = exp_list[n]
 
-
-        print("\n ####  Final fitting results  #### \n")
         print(" ESP fitting relative RMS:     {:10.5f} %".format(sqrt(self._current_esp_rrms)*100))
         print(" Value of fitting function:    {:10.5f}".format(self._current_func_eval))
         print("\n Performing ChElP fitting AFTER optimization: ")
 
         final_chelp_fit = chelp_coeff(esp_fit.points, \
-                esp_fit, centers, self._numE, types = pol_types, nuclei=all_nuclei, exponents=exp_list, coeff=coeff)
+                esp_fit, centers, self._numE, all_nuclei, types=pol_types, exponents=exp_list, coeff=coeff, print_results=False)
         
         calc_chelp_coeff(esp_norms_density, esp_fit.QM_esp_elec, self._numE, coeff=coeff, exponents=exp_list)
         #if not args.usep:
         #    esp_points.print_esp_to_points(esp_fit.points, centers, final_chelp_fit['coeff'], 'esp_diff.pdb', exponents=exp_list, vdw_ratios=final_chelp_fit['vdw_ratios'], max_pts=15000, esp_fit=esp_fit)
 
-        print(" {:>5s}  {:>8s}  {:>8s}  {:>8s}".format("Atom", "E-chg", "N-chg", "T-chg"))
-        for idx, x in enumerate(self._atom_map):
-            eChg = np.sum(coeff[x])
-            nChg = self._nuclei_in[idx]
-            chg = nChg - eChg
-            print(" {:5d}  {:8.3f}  {:8.3f}  {:8.3f}".format(idx + 1, eChg, nChg, chg))
-        print()
         s_pols_idx  = np.where(pol_types == 's')[0]
         eDip = -np.sum(coeff[s_pols_idx][:, None]*centers[s_pols_idx], axis=0)
         if len(np.where(pol_types == 'px')[0]) != 0:
@@ -445,7 +572,7 @@ class DensityFitting():
     def ESP_Min_callback(self, x, override=False):
         if self._current_step == 0:
             print(" ---------------------------------------------------------------------")
-            print("   Cycle       Func-Eval        ESP-RRMS   Max-Grad-Pop  Max-Grad-Exp")
+            print("   Cycle   Func-Eval      ESP-RRMS     Coeff-Diff    Exp-Diff")
             print(" ---------------------------------------------------------------------")
             self._old_x = np.zeros_like(x)
             self._old_f = 0.0
@@ -457,17 +584,29 @@ class DensityFitting():
             diff_x = np.abs(x - self._old_x)
             diff_f = self._current_func_eval - self._old_f
 
-        if np.mod(self._current_step, 10) == 0 or override:
+        if np.mod(self._current_step, 5) == 0 or override:
             dim = int(len(x)/2)
             max_diff_coeff = np.max(diff_x[:dim])
             max_diff_exp = np.max(diff_x[dim:])
-            print(" {:5d}  {:14.10f}  {:10.5f}  {:12.2e} {:12.2e}"\
-                .format(self._current_step, self._current_func_eval, np.sqrt(self._current_esp_rrms), max_diff_coeff, max_diff_exp))
+            if not override:
+                print(" {:5d}  {:14.10f}  {:10.5f}  {:12.2e} {:12.2e}"\
+                    .format(self._current_step, self._current_func_eval, np.sqrt(self._current_esp_rrms), max_diff_coeff, max_diff_exp))
+            else:
+                print(" {:5d}  {:14.10f}  {:10.5f}"\
+                    .format(self._current_step, self._current_func_eval, np.sqrt(self._current_esp_rrms)))
+
+
 
         self._current_x_diff = diff_x
         self._current_step += 1
         self._old_x = np.copy(x)
         self._old_f = self._current_func_eval
+
+        #   keep track of best guess
+        if self._current_func_eval < self._best_func:
+            self._best_func = self._current_func_eval
+            self._best_guess = np.copy(x)
+
 
     def ESP_Min_callback_old(self, x, override=False):
         dim = int(len(x)/2)

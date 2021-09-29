@@ -78,8 +78,12 @@ def create_qchem_job_str(options, coords, elements, total_chg = 0, spin_mult=1):
     for section, qc_options in options.items():
         if section in ['resp', 'intra_constraints']: continue
         file_str += '$%s\n' % section
-        for key, value in qc_options.items():
-            file_str += '   {:25s}  {:25s}\n'.format(key, value)
+        if section == 'rem':
+            for key, value in qc_options.items():
+                file_str += '   {:25s}  {:25s}\n'.format(key, value)
+        else:
+            for line in qc_options:
+                file_str += '   {:s}\n'.format(line)
         file_str += '$end\n\n'
 
     file_str += "$molecule\n"
@@ -479,18 +483,18 @@ if __name__ == '__main__':
         nuclei = [atom.element.atomic_number for atom in mol.topology.atoms()]
 
         print_section("Starting ESP Density Fitting", outfile=outfile)
-        #   overwrite std.out; density fitting does nto use output file, temp fix.
-        old_std_out = sys.stdout
+        #   overwrite std.out; density fitting does not use output file, temp fix.
         sys.stdout = outfile
-        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'])
+        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'], lone_pair_dist=opts.lone_pairs_dist)
         density_fitter.run_fitting()
         # try:
         #     density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'])
         #     density_fitter.run_fitting()
         # except: 
         #     print(" DENSITY FITTING HAS FAILED: ", sys.exc_info()[0], file=outfile)
-        sys.stdout = old_std_out
+        sys.stdout = sys.__stdout__
         print_section("Done with ESP Density Fitting", outfile=outfile)
+        exit()
 
     #   check if PDB file is provided. If not, turn off option
     pdb = None
@@ -527,6 +531,6 @@ if __name__ == '__main__':
         
     chdir(original_dir)
     final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
-    move(scratch_dir, final_dir_name)
+    os.rename(scratch_dir, final_dir_name)
     
     
