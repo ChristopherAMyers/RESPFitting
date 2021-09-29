@@ -3,6 +3,7 @@ from simtk.openmm.app import element
 import Elements
 from esp_fitting import *
 from scipy.optimize import minimize
+from lagrangians import LMLagrangian, CostLagrangian
 
 #cost_wt = 10**np.loadtxt('tmp')
 
@@ -25,7 +26,7 @@ class Density:
         self.type = type
 
 class DensityFitting():
-    def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.0005, resp_b=0.10, intra_constraints=None, lone_pair_dist=0.40) -> None:
+    def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.0005, resp_b=0.10, intra_constraints=None, lone_pair_dist=0.40, fitting_method='slsqp') -> None:
         self._ANG_TO_BOHR = 1.8897259885789
 
         self._n_dens = 1
@@ -43,6 +44,7 @@ class DensityFitting():
         self._resp_b = resp_b
         self._intra_constraints = intra_constraints
         self._bonded_to = []
+        self.fitting_method = str.lower(fitting_method)
 
         #   used to communicate results
         self._current_esp_rrms = None
@@ -386,7 +388,6 @@ class DensityFitting():
         if calc_d:
             #   derivative of ESP fitting function
             deriv = np.append(esp_res['coeff_deriv'], esp_res['exp_deriv'])/ esp_fit.sum_pot_sq
-            #deriv[dim:] *=0
 
             #   derivative of lone pair restraints
             for n in [idx for idx, nuc in enumerate(nuclei) if nuc == 0]:
@@ -412,6 +413,7 @@ class DensityFitting():
         self._current_deriv = deriv
 
         if calc_d:
+            #print("IN ESP: ", deriv)
             return (func_eval, deriv)
         else:
             return func_eval
@@ -429,6 +431,7 @@ class DensityFitting():
             fm = self.ESP_Min(xm, *args[:-1], calc_d=False)
 
             num_deriv = (fp - fm)/(2*eps)
+            num_deriv = (fp + fm - 2*fun)/(eps*eps)
             print(" {:10.5f}  {:10.5f}  {:10.5f}".format(x0[n], deriv[n], num_deriv))
         exit()
 
@@ -483,7 +486,7 @@ class DensityFitting():
         for n in range(len(init_guess_coeff)):
             bounds.append((0, None))
         for n in range(len(init_guess_exp)):
-            bounds.append((0.20, 20.0))
+            bounds.append((1.50, 15.0))
 
         #   constraints
         constraints = self.get_SLSQP_constrains(density_list, init_guess)
@@ -491,27 +494,38 @@ class DensityFitting():
         #   required arguments for fitting function
         args = (esp_norms_density, esp_fit, all_nuclei, True)
         
-        # for elm in self._atom_map:
-        #     print(elm)
-        # exit()
 
         #   run minimization routine
-        print("\n Starting SLSQP minimization routine ")
         self.ESP_Min(init_guess, *args)
-        self.ESP_Min_callback(init_guess, override=True)
-        res = minimize(self.ESP_Min, init_guess, 
-                        args=args, 
-                        callback=self.ESP_Min_callback,
-                        method="SLSQP",
-                        options={'disp':False, 'maxiter':500, 'ftol': 1e-6},
-                        #method="trust-constr",
-                        #options={'disp':True, 'maxiter':5000, 'verbose': 3},
-                        jac=True,
-                        bounds=bounds,
-                        constraints = constraints,
-                        )
+        if self.fitting_method == 'slsqp':
+            print("\n Starting SciPy SLSQP minimization routine ")
+            res = minimize(
+                self.ESP_Min, 
+                init_guess, 
+                method="SLSQP",
+                options={'disp':False, 'maxiter':300, 'ftol': 1e-10},
+                bounds=bounds,
+                constraints = constraints,
+                args=args, 
+                callback=self.ESP_Min_callback,
+                jac=True,
+                )
+        elif self.fitting_method == 'bfgs':
+            print("\n Starting SciPy L-BFGS-B minimization routine ")
+            lagrangian = CostLagrangian(self.ESP_Min, init_guess, args, constraints, 10)
+            res = minimize(
+                lagrangian.min_func,
+                lagrangian.get_guess(),
+                method="l-bfgs-b",
+                options={'disp':True, 'maxiter':500, 'gtol': 1E-2, 'ftol': 1E-14},
+                args=args, 
+                callback=self.ESP_Min_callback,
+                jac=True,
+                )
+        else: raise ValueError(" Fitting function must be 'SLSQP' or 'BFGS'")
+
         #   overwrite with best guess found through the entire searhc process
-        res.x = self._best_guess
+        res.x = self._best_guess[0:2*dim]  
         #self._test_numerical_derivative(res.x, args)
 
         print(" ---------------------------------------------------------------------")
@@ -587,7 +601,7 @@ class DensityFitting():
         if np.mod(self._current_step, 5) == 0 or override:
             dim = int(len(x)/2)
             max_diff_coeff = np.max(diff_x[:dim])
-            max_diff_exp = np.max(diff_x[dim:])
+            max_diff_exp = np.max(diff_x[dim:2*dim])
             if not override:
                 print(" {:5d}  {:14.10f}  {:10.5f}  {:12.2e} {:12.2e}"\
                     .format(self._current_step, self._current_func_eval, np.sqrt(self._current_esp_rrms), max_diff_coeff, max_diff_exp))
@@ -603,7 +617,7 @@ class DensityFitting():
         self._old_f = self._current_func_eval
 
         #   keep track of best guess
-        if self._current_func_eval < self._best_func:
+        if self._current_func_eval < self._best_func and self._current_step > 5:
             self._best_func = self._current_func_eval
             self._best_guess = np.copy(x)
 

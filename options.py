@@ -21,7 +21,7 @@ class Options():
         self.amber_fitting = True
         self.lone_pairs = False
         self.lone_pairs_dist = 0.40
-        self.lone_pairs_rest = 0.0
+        self.lone_pairs_k = 0.005
         self.vdw_ratios = [1.4, 1.6, 1.8, 2.0]
         self.mk_density = 20
 
@@ -29,15 +29,17 @@ class Options():
         self.lone_pairs = False
         self.n_dens = 1
         self.nh_dens = 1
+        self.fitting_method = 'slsqp'
 
         #   keywords that need to be converted to types other than strings
         self._keywords = {}
         self._keywords['charge'         ] = int
         self._keywords['optimize'       ] = strtobool
         self._keywords['density_fitting'] = strtobool
+        self._keywords['fitting_method' ] = str
         self._keywords['lone_pairs'     ] = strtobool
         self._keywords['lone_pairs_dist'] = float
-        self._keywords['lone_pairs_rest'] = float
+        self._keywords['lone_pairs_k'   ] = float
         self._keywords['n_dens'         ] = int
         self._keywords['nh_dens'        ] = int
         self._keywords['vdw_ratios'     ] = self.strToFloatList

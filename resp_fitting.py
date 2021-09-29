@@ -485,7 +485,11 @@ if __name__ == '__main__':
         print_section("Starting ESP Density Fitting", outfile=outfile)
         #   overwrite std.out; density fitting does not use output file, temp fix.
         sys.stdout = outfile
-        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'], lone_pair_dist=opts.lone_pairs_dist)
+        density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], 
+                charge=opts.charge, lone_pairs=opts.lone_pairs, 
+                intra_constraints=opts.input_sections['intra_constraints'], 
+                lone_pair_dist=opts.lone_pairs_dist,
+                lone_pair_k=opts.lone_pairs_k, fitting_method=opts.fitting_method)
         density_fitter.run_fitting()
         # try:
         #     density_fitter = DensityFitting(coords, nuclei, qc_esp_files[0], charge=opts.charge, lone_pairs=opts.lone_pairs, intra_constraints=opts.input_sections['intra_constraints'])
@@ -494,7 +498,6 @@ if __name__ == '__main__':
         #     print(" DENSITY FITTING HAS FAILED: ", sys.exc_info()[0], file=outfile)
         sys.stdout = sys.__stdout__
         print_section("Done with ESP Density Fitting", outfile=outfile)
-        exit()
 
     #   check if PDB file is provided. If not, turn off option
     pdb = None
