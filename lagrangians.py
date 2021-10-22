@@ -70,4 +70,17 @@ class CostLagrangian():
         deriv[0:self.dim*2] = df + 2*self.constr_mat.T @ constr_vals*self.cost
 
         return f, deriv
+    
+    def project(self, x):
+        G = self.constr_mat
+        G_GT_int = np.linalg.inv(G @ G.T)
+        G_prod = G.T @ G_GT_int
+        #I = np.eye(self.dim*2)
+
+        constr_vals = np.zeros(self.n_constr)
+        for n, constr in enumerate(self.constraints):
+            constr_vals[n] = constr['fun'](x, constr['args'])
+
+        return x - G_prod @ constr_vals
+        
 

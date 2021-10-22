@@ -26,7 +26,7 @@ class Density:
         self.type = type
 
 class DensityFitting():
-    def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.0005, resp_b=0.10, intra_constraints=None, lone_pair_dist=0.40, fitting_method='slsqp') -> None:
+    def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.001, resp_b=0.10, intra_constraints=None, lone_pair_dist=0.40, fitting_method='slsqp') -> None:
         self._ANG_TO_BOHR = 1.8897259885789
 
         self._n_dens = 1
@@ -56,6 +56,7 @@ class DensityFitting():
         self._current_x_diff = None
         self._best_guess = None
         self._best_func = 1E50
+        self._print_interval = 5
 
         #   esp data file
         self._esp_file = esp_file
@@ -214,6 +215,7 @@ class DensityFitting():
 
 
         constraints = []
+        constr_types = []
         dim = int(len(guess)/2)
         guess_exp = guess[dim:]
         all_nuclei = [g.element for g in densities]
@@ -257,20 +259,20 @@ class DensityFitting():
                             jac_vec = np.zeros(dim*2)
                             jac_vec[base_idx + dim] = 1
                             jac_vec[n + dim] = -1
-                            constraints.append(self.get_linear_constraint(jac_vec, 0.0))
+                            constraints.append(self.get_linear_constraint(jac_vec, 0.0, 'exp_type'))
 
         #   fix core populations
         for n in range(dim):
             if n in core_idx_list:
                 jac_vec = np.zeros(dim*2)
                 jac_vec[n] = 1
-                constraints.append(self.get_linear_constraint(jac_vec, 2.0))
+                constraints.append(self.get_linear_constraint(jac_vec, 2.0, 'core_pop'))
 
         #   total electron constraint
         print(" Applying 1 total charge constraint to the entire system")
         jac_vec = np.zeros(dim*2)
         jac_vec[0:dim] = 1
-        constraints.append(self.get_linear_constraint(jac_vec, self._numE))
+        constraints.append(self.get_linear_constraint(jac_vec, self._numE, 'total_e'))
 
         #   lone pair constraints
         for i, sites in enumerate(self._atom_map):
@@ -283,7 +285,7 @@ class DensityFitting():
                         jac_vec = np.zeros(dim*2)
                         jac_vec[lp_idx[0] + shift] = 1
                         jac_vec[n + shift] = -1
-                        constraints.append(self.get_linear_constraint(jac_vec, 0.0))
+                        constraints.append(self.get_linear_constraint(jac_vec, 0.0, 'total_e'))
                 print(" Applying %d lone-pair population constraints with host site O%d" % (n_lp_constr, (i+1)))
                 print(" Applying %d lone-pair exponent constraints with host site O%d" % (n_lp_constr, (i+1)))
 
@@ -337,16 +339,17 @@ class DensityFitting():
             constraints.append(self.get_linear_constraint(jac_vec, (total_nuclei - constr.charge)))
         
         
-        print(" \n\n Total number of cosntraints: {:d}".format(len(constraints)))
+        print(" \n\n Total number of constraints: {:d}".format(len(constraints)))
         print(" -----------------------------------------------------------------\n")
         return constraints
 
-    def get_linear_constraint(self, jac_vec, constr_val):
+    def get_linear_constraint(self, jac_vec, constr_val, label=None):
         return {
                     'type': 'eq',
                     'fun': lambda x, jac_vec: np.dot(jac_vec, x) - constr_val,
                     'jac': lambda x, jac_vec: jac_vec,
-                    'args': [jac_vec.copy()]
+                    'args': [jac_vec.copy()],
+                    'label': label 
                 }
 
     def ESP_Min(self, x, esp_norms, esp_fit, nuclei, calc_d):
@@ -367,7 +370,7 @@ class DensityFitting():
 
         #   hyperbolic restraint
         for n in [idx for idx, nuc in enumerate(nuclei) if nuc == 0]:
-                func_eval += 0.5*self._lone_pair_k*(coeff[n]**2)
+                func_eval += 0.05*self._lone_pair_k*(coeff[n]**2)
 
         #   charge RESP restraints
         q = [nuclei[idx[0]] - np.sum(coeff[idx]) for idx in self._atom_map]
@@ -376,6 +379,11 @@ class DensityFitting():
             if nuclei[atom_idx[0]] > 1:
                 sqrt_rest[n] = np.sqrt(q[n]**2 + self._resp_b**2)
                 func_eval += self._resp_a*(sqrt_rest[n] - self._resp_b)
+
+        exp_cost = 0.003
+        #func_eval += 0.000001*0.5*np.sum((exp-5.0)**2)
+        use_exp_cost = (exp < 5.0)
+        func_eval += exp_cost*np.sum((use_exp_cost/exp - 1/5.0)**2)
 
         # sqrt_exp_resp = np.zeros_like(exp)
         #print("BEFORE: ", func_eval)
@@ -404,6 +412,9 @@ class DensityFitting():
                     for idx in atom_idx:
                         deriv[idx] -= q[n]*self._resp_a/sqrt_rest[n]
 
+            #deriv[dim:] += 0.000001*(exp-5.0)
+            #deriv[dim:] += -exp_cost*(use_exp_cost/exp**2)
+            deriv[dim:] += -2*exp_cost*(use_exp_cost/exp - 1/5.0)*(use_exp_cost/exp)
 
             deriv *= 100
 
@@ -504,6 +515,7 @@ class DensityFitting():
         self.ESP_Min(init_guess, *args)
         if self.fitting_method == 'slsqp':
             print("\n Starting SciPy SLSQP minimization routine ")
+            self._print_header()
             res = minimize(
                 self.ESP_Min, 
                 init_guess, 
@@ -511,42 +523,43 @@ class DensityFitting():
                 options={'disp':False, 'maxiter':300, 'ftol': 1e-10},
                 bounds=bounds,
                 constraints = constraints,
-                args=args, 
-                callback=self.ESP_Min_callback,
-                jac=True,
-                )
+                args=args, callback=self.ESP_Min_callback, jac=True )
         elif self.fitting_method == 'bfgs':
             print("\n Starting SciPy L-BFGS-B minimization with cost-function constraints")
             for n in range(4):
-                lagrangian = CostLagrangian(self.ESP_Min, init_guess, args, constraints, 10)
+                self._print_interval = 100
+                cost_value = 500*(n+1)
+                print("\n Iteration {:d} with constraint cost coefficient: {:.1f}".format(n+1, cost_value))
+                self._print_header()
+                lagrangian = CostLagrangian(self.ESP_Min, init_guess, args, constraints, cost_value)
                 res = minimize(
                     lagrangian.min_func,
                     lagrangian.get_guess(),
                     method="l-bfgs-b",
                     options={'disp':False, 'maxiter':1000, 'gtol': 1E-2, 'ftol': 1E-14},
-                    args=args, 
-                    callback=self.ESP_Min_callback,
-                    jac=True,
-                    )
-                #print(res)
+                    args=args, callback=self.ESP_Min_callback, jac=True )
+                self.ESP_Min_callback(res.x, override=True)
+                print(" Projecting result onto constraint space")
+                self._best_guess = lagrangian.project(self._best_guess)
                 init_guess = self._best_guess
-                if res.success or 'ITERATIONS REACHED LIMIT' in res.message: break
-                print(" BFGS says: " + res.message)
-                print(" Resetting BFGS memory") 
+                #if res.success or 'ITERATIONS REACHED LIMIT' in res.message: break
+                print(" BFGS says: " + str(res.message))
+                print(" Resetting BFGS memory")
         else: raise ValueError(" Fitting function must be 'SLSQP' or 'BFGS'")
 
-        #   overwrite with best guess found through the entire searhc process
-        res.x = self._best_guess[0:2*dim]  
+        #   overwrite with best guess found through the entire search process
+        res.x = self._best_guess[0:2*dim] 
         #self._test_numerical_derivative(res.x, args)
 
         print(" ---------------------------------------------------------------------")
-        print("        #### " + res.message + " #### ")
+        print("        #### " + str(res.message) + " #### ")
         print(" Using best guess found:")
         self.ESP_Min_callback(res.x, override=True)
         print(" ---------------------------------------------------------------------")
 
         coeff = res.x[0:dim]
-        exp_list = np.exp(res.x[dim:])
+        # coeff[6] -= 0.02
+        # coeff[9] += 0.02
         exp_list = res.x[dim:]
         for n, c in enumerate(coeff):
             density_list[n].coeff = c
@@ -589,16 +602,17 @@ class DensityFitting():
                 atm_chg = all_nuclei[n] - np.sum(atom_coeff)
                 atm_chg_str = '{:10.4f}'.format(atm_chg)
             else:
-                atm_chg_str = '{:10s}'.format('')
+                atm_chg_str = '{:>10s}'.format('XXX  ')
             print(" {:3d}  {:3d}   {:2s}  {:3s}  {:10s}  {:10.4f}  {:10.4f}  {:10.4f}".format(n + 1, density_list[n].atom_id + 1, elm, pol_types[n], atm_chg_str, all_nuclei[n] - coeff[n], coeff[n], exp_list[n]))
         print(" --------------------------------------------------------------------")
 
+    def _print_header(self):
+        print(" ---------------------------------------------------------------------")
+        print("   Cycle   Func-Eval      ESP-RRMS     Coeff-Diff    Exp-Diff")
+        print(" ---------------------------------------------------------------------")
 
     def ESP_Min_callback(self, x, override=False):
         if self._current_step == 0:
-            print(" ---------------------------------------------------------------------")
-            print("   Cycle   Func-Eval      ESP-RRMS     Coeff-Diff    Exp-Diff")
-            print(" ---------------------------------------------------------------------")
             self._old_x = np.zeros_like(x)
             self._old_f = 0.0
 
@@ -609,7 +623,7 @@ class DensityFitting():
             diff_x = np.abs(x - self._old_x)
             diff_f = self._current_func_eval - self._old_f
 
-        if np.mod(self._current_step, 5) == 0 or override:
+        if np.mod(self._current_step, self._print_interval) == 0 or override:
             dim = int(len(x)/2)
             max_diff_coeff = np.max(diff_x[:dim])
             max_diff_exp = np.max(diff_x[dim:2*dim])
@@ -619,8 +633,6 @@ class DensityFitting():
             else:
                 print(" {:5d}  {:14.10f}  {:10.5f}"\
                     .format(self._current_step, self._current_func_eval, np.sqrt(self._current_esp_rrms)))
-
-
 
         self._current_x_diff = diff_x
         self._current_step += 1
