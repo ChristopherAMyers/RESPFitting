@@ -1,0 +1,56 @@
+STARTING RESP PYTHON PROGRAM
+ Creating scratch directory:
+	/network/rit/lab/ChenRNALab/awesomeSauce/code/resp_fitting/src/example/esp_file/__mol__
+ Changing directory to scratch
+ Loading Molecule file
+ Loading ESP File. Q-Chem will NOT be run
+ NOTE: Program can only use one ESP file at a time.
+       Multiple conformation fitting is not yet implimented.
+
+ Checking for AmberTools executables
+     * antechamber executable located at /home/cmyers/miniconda3/bin/antechamber
+     * resp executable located at /home/cmyers/miniconda3/bin/resp
+     * respgen executable located at /home/cmyers/miniconda3/bin/respgen
+
+ Formatting ESP data file for Amber RESP program
+ 	There are 1 files to format
+
+
+ ------------------------------------------------------
+ Generating individual resp inputs for fragment
+ ------------------------------------------------------
+
+
+ Calling Antechamber: 
+	 antechamber -i frame_0/frame_0.pdb -fi pdb -o frame_0/frame_0.ac -fo ac -dr no -nc 0
+
+ ANTECHAMBER OUTPUT: 
+ Calling respgen: 
+	 respgen -i frame_0/frame_0.ac -o frame_0/frame_0.respin1 -f resp1
+
+ RESPGEN OUTPUT:  
+
+ Calling respgen: 
+	 respgen -i frame_0/frame_0.ac -o frame_0/frame_0.respin2 -f resp2
+
+ RESPGEN OUTPUT:  
+
+ ------------------------------------------------------
+
+
+
+
+ ------------------------------------------------------
+ Starting RESP Fitting Program
+ ------------------------------------------------------
+
+
+ Calling Amber RESP Program:
+	resp -O -i resp1.in -o resp1.out -e esp.dat -t q1.out 
+ RESP OUTPUT:  
+ Calling Amber RESP Program:
+	resp -O -i resp2.in -o resp2.out -e esp.dat -t q2.out -q q1.out
+ RESP OUTPUT:  
+ ------------------------------------------------------
+
+

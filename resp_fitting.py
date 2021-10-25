@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 from copy import Error
+import shutil
 import numpy as np
 from simtk.openmm.app import PDBFile
 from simtk.unit import *
 import os
 from distutils.util import strtobool
-from shutil import copyfile, move
+from shutil import copyfile, move, which
 import argparse
 import warnings
 import os.path as path
@@ -100,8 +101,7 @@ def create_qchem_job(opts, scratch, name, esp_points, coords, elements, outfile=
 
     qc_envirn = environ.get('QC', None)
     if not qc_envirn:
-        print(" WARNING: QC environment varible not defined", file=outfile)
-        print("          Q-Chem may not be callable", file=outfile)
+        raise ValueError("QC environment varible not defined")
 
     #   create job directories and file names
     job_dir = path.join(scratch, name)
@@ -399,6 +399,37 @@ def print_section(message, length=54, outfile=sys.stdout):
     print(border, file=outfile)
     print("\n", file=outfile)
 
+def check_amber_tools(out_file=sys.stdout):
+    print("\n Checking for AmberTools executables", file=out_file)
+
+    exe_locs = {'antechamber': None, 'resp': None, 'respgen': None}
+    for exe in exe_locs:
+        exe_locs[exe] = which(exe)
+    
+    found_all = True
+    for exe, exe_loc in exe_locs.items():
+        if exe_loc is None:
+            found_all = False
+        print("     * {:s} executable located at {:s}".format(exe, exe_loc), file=out_file)
+
+    if not found_all:
+        raise SystemError(" Could not find all required AmberTools executables")
+
+
+    # antechamber_loc = which('antechamber')
+    # resp_loc = which('resp')
+
+    # if antechamber_loc is None:
+    #     raise SystemError('Cannot find executable for "antechamber"')
+    # else:
+    #     print("     * antechamber executable located at: {:s}".format(antechamber_loc), file=out_file)
+
+    # if resp_loc is None:
+    #     raise SystemError('Cannot find executable for "resp"')
+    # else:
+    #     print("     * resp executable located at: {:s}".format(resp_loc), file=out_file)
+    print("", file=out_file)
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
@@ -415,17 +446,22 @@ if __name__ == '__main__':
     if args.out:
         outfile =open(args.out, 'w')
 
-    print("STARTING RESP PYTHON PROGRAM", file=outfile)
+    print(" STARTING RESP PYTHON PROGRAM", file=outfile)
     #   grep job and Q-Chem options
     opts = Options(args.ipt)
-    #exit()
-
-    #   set up scratch directory
     original_dir = path.abspath(path.curdir)
     print(" Creating scratch directory:", file=outfile)
     mol_file = args.mol
     if opts.name == "":
         opts.name = path.splitext(path.basename(mol_file))[0]
+    
+    #   check to make sure that final directory doesn't already exist
+    final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
+    if os.path.isdir(final_dir_name):
+        print('\n\n ERROR: output directory {:s} already exists. \n Change or set the "name" option in the input file to something other than "{:s}"\n\n'.format(final_dir_name, opts.name))
+        raise RuntimeError("Output directory already exists")
+    
+    #   set up scratch directory
     scratch_dir = path.abspath(path.join(path.curdir, "__" + opts.name + "__"))
     makedirs(scratch_dir, exist_ok=True)
     print('\t' + scratch_dir, file=outfile)
@@ -502,6 +538,7 @@ if __name__ == '__main__':
     #   check if PDB file is provided. If not, turn off option
     pdb = None
     if opts.amber_fitting:
+        check_amber_tools(outfile)
         if isinstance(mol, PDBFile):
             pdb = mol
         elif args.pdb:
@@ -518,7 +555,7 @@ if __name__ == '__main__':
     #   perform RESP fitting with AmberTools
     if pdb is not None:
         coords_all = [pdb.getPositions(frame=i, asNumpy=True)/angstrom for i in range(pdb.getNumFrames())]
-        create_esp_data_file(qc_esp_files, coords_all)
+        create_esp_data_file(qc_esp_files, coords_all, outfile=outfile)
         if args.chg:
             #   load in Q-Chem pre-generated charges for fitting analysis
             print(" Loading charge file for analysis only. Q-Chem will NOT be run")

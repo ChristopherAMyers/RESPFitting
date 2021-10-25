@@ -1,0 +1,15 @@
+$resp
+    name        adenine                 ! save results in the directory 'resp_adenine'
+    charge      0                       ! total charge of 0 e
+    vdw_ratios  [1.4, 1.6, 1.8, 2.0]    ! default vdW radii scaling factors
+    mk_density  20                      ! 20 Merz-Kollman ESP points per angstrom^2 on each sphere
+$end
+
+$rem
+    jobtype         sp     ! single point energy calculation
+    method          HF     ! Hartree-Fock exchange
+    basis           6-31G* ! Popel basis set
+    sym_ignore      true   ! do not translate or rotate coords
+    resp_charges    true   ! Q-Chem RESP charges (for comparison only)
+    chelpg          true   ! Q-Chem CHELPG charges (for comparison only)
+$end

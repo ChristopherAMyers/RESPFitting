@@ -1,0 +1,123 @@
+ STARTING RESP PYTHON PROGRAM
+ Creating scratch directory:
+	/network/rit/lab/ChenRNALab/awesomeSauce/code/resp_fitting/src/example/qchem/__adenine__
+ Changing directory to scratch
+ Loading Molecule file
+
+
+ ------------------------------------------------------
+ Starting ESP generation with Q-Chem
+ ------------------------------------------------------
+
+ Generating ESP Points using Merz-Kollman procedure
+	 vdW interval 1.40 includes 4047 ESP points
+	 vdW interval 1.60 includes 4567 ESP points
+	 vdW interval 1.80 includes 5218 ESP points
+	 vdW interval 2.00 includes 5902 ESP points
+	 Total number of ESP points: 19734
+
+ Starting Q-Chem job. Output will be printed to:
+	 /network/rit/lab/ChenRNALab/awesomeSauce/code/resp_fitting/src/example/qchem/__adenine__/frame_0/qchem.out
+ Q-Chem Console Output:
+ 	You are running Q-Chem version: 5.3.2
+ 	
+ 	#
+ 	# job setting
+ 	#
+ 	local host:  guanine
+ 	current dir: /network/rit/lab/ChenRNALab/awesomeSauce/code/resp_fitting/src/example/qchem/__adenine__/frame_0
+ 	input file:  /network/rit/lab/ChenRNALab/awesomeSauce/code/resp_fitting/src/example/qchem/__adenine__/frame_0/qchem.in
+ 	output file: /network/rit/lab/ChenRNALab/awesomeSauce/code/resp_fitting/src/example/qchem/__adenine__/frame_0/qchem.out
+ 	nprocs     : 0
+ 	nthreads   : 8
+ 	#
+ 	# qchem installation setting
+ 	#
+ 	QC:          /network/rit/lab/ChenRNALab/bin/Q-Chem5.3
+ 	QCAUX:       /network/rit/lab/ChenRNALab/bin/Q-Chem5.3/qcaux
+ 	QCPROG:      /network/rit/lab/ChenRNALab/bin/Q-Chem5.3/exe/qcprog.exe_s
+ 	QCPROG_S:    /network/rit/lab/ChenRNALab/bin/Q-Chem5.3/exe/qcprog.exe_s
+ 	PARALLEL:    -DSERIAL
+ 	QCMPI:       seq
+ 	#
+ 	# qchem directory setting
+ 	#
+ 	qcrun:       qchem756994
+ 	QCSCRATCH:   /tmp
+ 	QCLOCALSCR:  
+ 	QCTMPDIR:    /tmp
+ 	QCFILEPREF:  /tmp/qchem756994
+ 	QCSAVEDIR:   
+ 	workdirs:    /tmp/qchem756994
+ 	workdir0:    /tmp/qchem756994
+ 	partmpdirs =  
+ 	#
+ 	# parallel setting
+ 	#
+ 	QCRSH:           ssh
+ 	QCMPI:           seq
+ 	QCMPIRUN:        
+ 	QCMACHINEFILE:   
+ 	
+ 	#
+ 	# env setting
+ 	#
+ 	exported envs:   QC QCAUX QCSCRATCH QCRUNNAME QCFILEPREF QCPROG QCPROG_S GUIFILE
+ 	remove work dirs /tmp/qchem756994.0 -- /tmp/qchem756994.-1
+ 	rm -rf /tmp/qchem756994
+ 	
+ Q-Chem job has finished successfully
+
+ ------------------------------------------------------
+ All Q-Chem jobs are finished
+ ------------------------------------------------------
+
+
+
+ Checking for AmberTools executables
+     * antechamber executable located at /home/cmyers/miniconda3/bin/antechamber
+     * resp executable located at /home/cmyers/miniconda3/bin/resp
+     * respgen executable located at /home/cmyers/miniconda3/bin/respgen
+
+ Formatting ESP data file for Amber RESP program
+ 	There are 1 files to format
+
+
+ ------------------------------------------------------
+ Generating individual resp inputs for fragment
+ ------------------------------------------------------
+
+
+ Calling Antechamber: 
+	 antechamber -i frame_0/frame_0.pdb -fi pdb -o frame_0/frame_0.ac -fo ac -dr no -nc 0
+
+ ANTECHAMBER OUTPUT: 
+ Calling respgen: 
+	 respgen -i frame_0/frame_0.ac -o frame_0/frame_0.respin1 -f resp1
+
+ RESPGEN OUTPUT:  
+
+ Calling respgen: 
+	 respgen -i frame_0/frame_0.ac -o frame_0/frame_0.respin2 -f resp2
+
+ RESPGEN OUTPUT:  
+
+ ------------------------------------------------------
+
+
+
+
+ ------------------------------------------------------
+ Starting RESP Fitting Program
+ ------------------------------------------------------
+
+
+ Calling Amber RESP Program:
+	resp -O -i resp1.in -o resp1.out -e esp.dat -t q1.out 
+ RESP OUTPUT:  
+ Calling Amber RESP Program:
+	resp -O -i resp2.in -o resp2.out -e esp.dat -t q2.out -q q1.out
+ RESP OUTPUT:  
+ ------------------------------------------------------
+
+

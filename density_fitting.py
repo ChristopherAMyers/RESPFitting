@@ -28,7 +28,6 @@ class Density:
 class DensityFitting():
     def __init__(self, coords_in, nuclei_in, esp_file, charge=0, lone_pairs=False, lone_pair_k=0.005, resp_a=0.001, resp_b=0.10, intra_constraints=None, lone_pair_dist=0.40, fitting_method='slsqp') -> None:
         self._ANG_TO_BOHR = 1.8897259885789
-
         self._n_dens = 1
         self._nh_dens = 1
         self._n_atoms = 0
