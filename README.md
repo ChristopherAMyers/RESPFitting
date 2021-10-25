@@ -7,9 +7,14 @@ A typical call to the program will generate ESP points using the Merz-Kollman pr
 
 At the moment, only single conformational fits can be performed, and geometry optimization can not be performed durring the fitting process.
 
+# Requirements
+Before running the program, please make sure that your computer can find the AmberTools executables, specifically the 'respgen', 'antechamber', and 'resp' executables. If these are not present, either download and install them from the AmberMD website https://ambermd.org/AmberTools.php or install them using the conda installer https://anaconda.org/conda-forge/ambertools.  
+\
+Additionally, if you would like the program to generate ESP data from Q-Chem, the $QC environment variable must be specified. To set this (and other enviroment variables used by Q-Chem), source the qcenv.sh script located in the Q-Chem installation directory.
+
 # Usage
 ```
-usage: resp_fitting.py [-h] [-ipt IPT] [-pdb PDB] [-out OUT] [-esp ESP]
+python3 resp_fitting.py [-h] [-ipt IPT] [-pdb PDB] [-out OUT] [-esp ESP]
                        [-chg CHG] -mol MOL
 
 optional arguments:
@@ -36,7 +41,7 @@ optional arguments:
 ```
 All are assumed to be in atomic units. The same format is also used by Q-Chem when generating ESP data.
 
-# input file
+# Input file
 The input file, specified with the ```-ipt``` flag, contains the options for both the RESP python program and Q-Chem. 
 The format is designed to mimic that of Q-Chem's input file format, and an example of what one might look like is as follows:
 ```
