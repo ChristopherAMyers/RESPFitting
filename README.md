@@ -1,4 +1,5 @@
 # RESPFitting
+[![DOI](https://zenodo.org/badge/411681028.svg)](https://zenodo.org/badge/latestdoi/411681028)
 
 The example here creates and runs the necessary RESP input files for AmberTools. 
 The generation of ESP data is designed to be used with Q-Chem program, although ESP data can be generated with other softwares and imported into the fitting procedure.
