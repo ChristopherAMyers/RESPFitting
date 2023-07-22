@@ -1,7 +1,7 @@
 from argparse import FileType
-from simtk.openmm.app import PDBFile, Topology, element
-from simtk.openmm import Vec3
-from simtk.unit import nanometers, angstroms, is_quantity, norm, Quantity, dot
+from openmm.app import PDBFile, Topology, element
+from openmm import Vec3
+from openmm.unit import nanometers, angstroms, is_quantity, norm, Quantity, dot
 import numpy as np
 from os.path import *
 

@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-from copy import Error
-import shutil
 import numpy as np
-from simtk.openmm.app import PDBFile
-from simtk.unit import *
+from openmm.app import PDBFile
+from openmm.unit import *
 import os
+from os import chdir, makedirs, environ
+import os.path as path
 from distutils.util import strtobool
 from shutil import copyfile, move, which
 import argparse
 import warnings
-import os.path as path
-from os import chdir, makedirs, environ
 import subprocess
 from multiprocessing import cpu_count
 import glob
+import sys
 
 from options import Options
 from esp_points import ESPPointGenerator

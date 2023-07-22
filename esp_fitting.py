@@ -1,12 +1,8 @@
 import numpy as np
-from numpy.lib.arraysetops import unique
 from numpy.linalg import norm
 from math import ceil, pi, floor, sin, cos, sqrt
 import sys
 from os import devnull
-from numpy.linalg.linalg import eigvals
-
-from simtk.openmm.app import element
 
 import Elements
 
@@ -68,7 +64,7 @@ def _format_83(f):
     raise ValueError('coordinate "%s" could not be represented '
                      'in a width-8 field' % f)
 
-def print_esp_to_points(points, coords, coeff, file_out, exponents=None, vdw_ratios=None, max_pts=None, esp_fit=None):
+def print_esp_to_points(points, coords, coeff, file_out, exponents=None, vdw_ratios=None, max_pts=None, esp_fit: ESPFit = None):
     ''' Print ESP evaluated at xyz points to PDB file
     '''
 
@@ -181,7 +177,7 @@ def calc_chelp_coeff(norms, QM_esp_elec, n_elec, coeff=None, types=None, exponen
     #print("EXP: ", exponents)
     return res
 
-def chelp_coeff(points, esp_fit, coords, n_elec, nuclei, types = [], exponents=None, coeff=None, print_results=True):
+def chelp_coeff(points, esp_fit: ESPFit, coords, n_elec, nuclei, types = [], exponents=None, coeff=None, print_results=True):
     '''
     Calculate ChElPG equvilant for electronic coefficients
     Note: Assumes that QM_esp_elec is the ELECTRON potential

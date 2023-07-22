@@ -1,5 +1,4 @@
 import numpy as np
-from simtk.openmm.app import element
 import Elements
 from esp_fitting import *
 from scipy.optimize import minimize

@@ -1,5 +1,5 @@
-from simtk.openmm.app.element import Element
-from simtk.openmm.app import CharmmPsfFile
+from openmm.app.element import Element
+from openmm.app import CharmmPsfFile
 __name2intDict = {
         "H": 1,
         "C": 6,
