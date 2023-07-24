@@ -6,7 +6,7 @@ import os
 from os import chdir, makedirs, environ
 import os.path as path
 from distutils.util import strtobool
-from shutil import copyfile, move, which
+from shutil import copyfile, move, which, rmtree
 import argparse
 import warnings
 import subprocess
@@ -432,45 +432,15 @@ def check_amber_tools(out_file=sys.stdout):
     #     print("     * resp executable located at: {:s}".format(resp_loc), file=out_file)
     print("", file=out_file)
 
-def main(file_args, opts):
+def main(file_args, opts, mol_file_loc, outfile):
 
-    outfile=sys.stdout
-    if file_args.out:
-        outfile =open(file_args.out, 'w')
-
-    print(" STARTING RESP PYTHON PROGRAM", file=outfile)
-    #   grep job and Q-Chem options
-    opts = Options(file_args.ipt)
-    original_dir = path.abspath(path.curdir)
-    print(" Creating scratch directory:", file=outfile)
-    mol_file = file_args.mol
-    if opts.name == "":
-        opts.name = path.splitext(path.basename(mol_file))[0]
-    
-    #   check to make sure that final directory doesn't already exist
-    final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
-    if os.path.isdir(final_dir_name):
-        print('\n\n ERROR: output directory {:s} already exists. \n Change or set the "name" option in the input file to something other than "{:s}"\n\n'.format(final_dir_name, opts.name))
-        raise RuntimeError("Output directory already exists")
-    
-    #   set up scratch directory
-    scratch_dir = path.abspath(path.join(path.curdir, "__" + opts.name + "__"))
-    makedirs(scratch_dir, exist_ok=True)
-    print('\t' + scratch_dir, file=outfile)
-
-    #   copy mol file to scratch and chagne directory
-    if file_args.pdb:
-        file_args.pdb = path.abspath(file_args.pdb)
-    print(" Changing directory to scratch", file=outfile)
-    mol_file_name = path.basename(file_args.mol)
-    copyfile(mol_file, path.join(scratch_dir, mol_file_name))
-    chdir(scratch_dir)
+    scratch_dir = path.abspath(path.curdir)
 
     #   load pdb file
     print(" Loading Molecule file", file=outfile)
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        mol = Molecule(mol_file_name)
+        mol = Molecule(mol_file_loc)
     elms = [x.element.symbol for x in mol.topology.atoms()]
     point_gen = ESPPointGenerator()
     
@@ -482,6 +452,8 @@ def main(file_args, opts):
     if file_args.pts:
         
         pts_file_split = path.splitext(file_args.pts)
+        if pts_file_split[0] == '':
+            pts_file_split = '.xyz'
         for n in range(mol.getNumFrames()):
             pos = mol.getPositions(asNumpy=True, frame=n)/angstroms
             esp_points = point_gen.gen_MK_points(elms, pos, outfile=outfile, intervals=opts.vdw_ratios, density=opts.mk_density)*angstrom.conversion_factor_to(bohr)
@@ -490,7 +462,7 @@ def main(file_args, opts):
             out_file = pts_file_split[0] + f'_{n}' + pts_file_split[1]
             point_gen.print_xyz(out_file)
 
-        exit()
+        return
 
     if file_args.esp:
         #   load in Q-Chem generated ESP data
@@ -498,7 +470,6 @@ def main(file_args, opts):
         print(" NOTE: Program can only use one ESP file at a time.", file=outfile)
         print("       Multiple conformation fitting is not yet implimented.", file=outfile)
         mol._positions = [mol._positions[0]]
-        file_args.esp = path.join(original_dir, file_args.esp)
         if path.isfile(file_args.esp):
             qc_esp_files = [file_args.esp]
         else:
@@ -554,7 +525,8 @@ def main(file_args, opts):
             pdb = PDBFile(file_args.pdb)
             pdb._positions = mol._positions
         else:
-            out_pdb_file = path.splitext(mol_file_name)[0] + '.pdb'
+            mol_file_name = path.splitext(mol_file_loc)[0]
+            out_pdb_file = path.splitext(mol_file_name + '.pdb')
             PDBFile.writeFile(mol.getTopology(), mol.getPositions(), open(out_pdb_file, 'w'))
             pdb = PDBFile(out_pdb_file)
             pdb._positions = mol._positions
@@ -566,7 +538,6 @@ def main(file_args, opts):
         if file_args.chg:
             #   load in Q-Chem pre-generated charges for fitting analysis
             print(" Loading charge file for analysis only. Q-Chem will NOT be run")
-            file_args.chg = path.join(original_dir, file_args.chg)
             charges = load_charges(file_args.chg)
             charges = np.reshape(charges, (pdb.getNumFrames(), pdb.topology.getNumAtoms()))
             info = create_amber_files(pdb, outfile=outfile, net_charge=opts.charge, irstrnt=2, init_charges=charges)
@@ -576,9 +547,6 @@ def main(file_args, opts):
             create_amber_files(pdb, outfile=outfile, net_charge=opts.charge)
             call_resp(outfile=outfile)
         
-    chdir(original_dir)
-    final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
-    os.rename(scratch_dir, final_dir_name)
     
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -591,4 +559,48 @@ if __name__ == '__main__':
     parser.add_argument('-pts', required=False)
     args = parser.parse_args()
 
-    main(args)
+    outfile=sys.stdout
+    if args.out:
+        outfile = open(args.out, 'w')
+
+    #   change file args to absolute paths
+    for arg, file_loc in args._get_kwargs():
+        if file_loc is not None:
+            setattr(args, arg, path.abspath(file_loc))
+
+    print(" STARTING RESP PYTHON PROGRAM", file=outfile)
+    #   grep job and Q-Chem options
+    opts = Options(args.ipt)
+    original_dir = path.abspath(path.curdir)
+    print(" Creating scratch directory:", file=outfile)
+    mol_file = args.mol
+    if opts.name == "":
+        opts.name = path.splitext(path.basename(mol_file))[0]
+    
+    #   check to make sure that final directory doesn't already exist
+    final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
+    if os.path.isdir(final_dir_name):
+        print('\n\n ERROR: output directory {:s} already exists. \n Change or set the "name" option in the input file to something other than "{:s}"\n\n'.format(final_dir_name, opts.name))
+        raise RuntimeError("Output directory already exists")
+    
+    #   set up scratch directory
+    scratch_dir = path.abspath(path.join(path.curdir, "__" + opts.name + "__"))
+    makedirs(scratch_dir, exist_ok=True)
+    print('\t' + scratch_dir, file=outfile)
+
+    #   copy mol file to scratch and chagne directory
+    print(" Changing directory to scratch", file=outfile)
+    mol_file_name = path.basename(args.mol)
+    copyfile(mol_file, path.join(scratch_dir, mol_file_name))
+    chdir(scratch_dir)
+
+    #   MAIN PROGRAM
+    main(args, opts, mol_file_name, outfile)
+
+    #   clean up scratch directory
+    chdir(original_dir)
+    if args.pts:
+        rmtree(scratch_dir)
+    else:
+        final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
+        os.rename(scratch_dir, final_dir_name)
