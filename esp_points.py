@@ -12,6 +12,7 @@ class ESPPointGenerator():
             'P': 2.50,
             'S': 2.20
         }
+        self._point_positions = np.array([])
 
     def _find_neighbors(self, elements, coords, radii):
         ''' Find list of neighbors to each coordinate '''
@@ -25,11 +26,11 @@ class ESPPointGenerator():
 
         return nbr_list
 
-    def print_xyz(self, points, out_file_loc):
+    def print_xyz(self, out_file_loc):
         with open(out_file_loc, 'w') as file:
-            file.write('{:d} \n'.format(len(points)))
-            file.write('ESP points \n')
-            for pt in points:
+            file.write('{:d} \n'.format(len(self._point_positions )))
+            file.write('Merz-Kollman ESP points \n')
+            for pt in self._point_positions :
                 file.write('He {:15.8f}  {:15.8f}  {:15.8f} \n'.format(*pt))
 
     def gen_MK_points(self, elements, coords, intervals=[], density=5.0, outfile=open(os.devnull, 'w')):
@@ -96,8 +97,8 @@ class ESPPointGenerator():
             print("\t vdW interval {:.2f} includes {:d} ESP points".format(scale, scale_point_count), file=outfile)
 
         print("\t Total number of ESP points: {:d}\n".format(len(all_pts)), file=outfile)
-
-        return np.array(all_pts)
+        self._point_positions = np.array(all_pts)
+        return self._point_positions
 
 
 

@@ -96,6 +96,12 @@ def create_qchem_job_str(options, coords, elements, total_chg = 0, spin_mult=1):
     file_str += "$end\n"
     return file_str
 
+def write_esp_point_file(out_file_loc, esp_points):
+     #   write ESP points to file file
+    with open(out_file_loc, 'w') as file:
+        for point in esp_points:
+            file.write('{:15.8f}  {:15.8f}  {:15.8f} \n'.format(*point))
+
 def create_qchem_job(opts, scratch, name, esp_points, coords, elements, outfile=sys.stdout):
 
     qc_envirn = environ.get('QC', None)
@@ -125,10 +131,7 @@ def create_qchem_job(opts, scratch, name, esp_points, coords, elements, outfile=
             file.write(ipt_lines)
 
     #   write ESP points to file file
-    with open(path.join(job_dir, 'ESPGrid'), 'w') as file:
-        for point in esp_points:
-            file.write('{:15.8f}  {:15.8f}  {:15.8f} \n'.format(*point))
-
+    write_esp_point_file(path.join(job_dir, 'ESPGrid'), esp_points)
     
     #   Change to directory containing input/output file.
     #   This is because Q-Chem looks for ESPGrid file there
@@ -429,28 +432,18 @@ def check_amber_tools(out_file=sys.stdout):
     #     print("     * resp executable located at: {:s}".format(resp_loc), file=out_file)
     print("", file=out_file)
 
-if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-ipt', required=False)
-    parser.add_argument('-pdb', required=False)
-    parser.add_argument('-out', required=False)
-    parser.add_argument('-esp', required=False)
-    parser.add_argument('-chg', required=False)
-    parser.add_argument('-mol', required=True)
-    args = parser.parse_args()
-
+def main(file_args, opts):
 
     outfile=sys.stdout
-    if args.out:
-        outfile =open(args.out, 'w')
+    if file_args.out:
+        outfile =open(file_args.out, 'w')
 
     print(" STARTING RESP PYTHON PROGRAM", file=outfile)
     #   grep job and Q-Chem options
-    opts = Options(args.ipt)
+    opts = Options(file_args.ipt)
     original_dir = path.abspath(path.curdir)
     print(" Creating scratch directory:", file=outfile)
-    mol_file = args.mol
+    mol_file = file_args.mol
     if opts.name == "":
         opts.name = path.splitext(path.basename(mol_file))[0]
     
@@ -466,10 +459,10 @@ if __name__ == '__main__':
     print('\t' + scratch_dir, file=outfile)
 
     #   copy mol file to scratch and chagne directory
-    if args.pdb:
-        args.pdb = path.abspath(args.pdb)
+    if file_args.pdb:
+        file_args.pdb = path.abspath(file_args.pdb)
     print(" Changing directory to scratch", file=outfile)
-    mol_file_name = path.basename(args.mol)
+    mol_file_name = path.basename(file_args.mol)
     copyfile(mol_file, path.join(scratch_dir, mol_file_name))
     chdir(scratch_dir)
 
@@ -484,17 +477,32 @@ if __name__ == '__main__':
     qc_esp_files = []
     qc_charges   = []
     qc_energies  = []
-    if args.esp:
+
+     #   no fitting is requested, only point generation
+    if file_args.pts:
+        
+        pts_file_split = path.splitext(file_args.pts)
+        for n in range(mol.getNumFrames()):
+            pos = mol.getPositions(asNumpy=True, frame=n)/angstroms
+            esp_points = point_gen.gen_MK_points(elms, pos, outfile=outfile, intervals=opts.vdw_ratios, density=opts.mk_density)*angstrom.conversion_factor_to(bohr)
+
+            #   number each point file with the frame number
+            out_file = pts_file_split[0] + f'_{n}' + pts_file_split[1]
+            point_gen.print_xyz(out_file)
+
+        exit()
+
+    if file_args.esp:
         #   load in Q-Chem generated ESP data
         print(" Loading ESP File. Q-Chem will NOT be run", file=outfile)
         print(" NOTE: Program can only use one ESP file at a time.", file=outfile)
         print("       Multiple conformation fitting is not yet implimented.", file=outfile)
         mol._positions = [mol._positions[0]]
-        args.esp = path.join(original_dir, args.esp)
-        if path.isfile(args.esp):
-            qc_esp_files = [args.esp]
+        file_args.esp = path.join(original_dir, file_args.esp)
+        if path.isfile(file_args.esp):
+            qc_esp_files = [file_args.esp]
         else:
-            raise FileNotFoundError("ESP provided file does not exist")   
+            raise FileNotFoundError("ESP provided file does not exist")
     else:
         #   create ESP files with Q-Chem
         print("\n\n ------------------------------------------------------", file=outfile)
@@ -540,10 +548,10 @@ if __name__ == '__main__':
         check_amber_tools(outfile)
         if isinstance(mol, PDBFile):
             pdb = mol
-        elif args.pdb:
+        elif file_args.pdb:
             print(" Loading PDB file for Amber charge fitting")
             print(" Positions from -mol will be used instead")
-            pdb = PDBFile(args.pdb)
+            pdb = PDBFile(file_args.pdb)
             pdb._positions = mol._positions
         else:
             out_pdb_file = path.splitext(mol_file_name)[0] + '.pdb'
@@ -555,11 +563,11 @@ if __name__ == '__main__':
     if pdb is not None:
         coords_all = [pdb.getPositions(frame=i, asNumpy=True)/angstrom for i in range(pdb.getNumFrames())]
         create_esp_data_file(qc_esp_files, coords_all, outfile=outfile)
-        if args.chg:
+        if file_args.chg:
             #   load in Q-Chem pre-generated charges for fitting analysis
             print(" Loading charge file for analysis only. Q-Chem will NOT be run")
-            args.chg = path.join(original_dir, args.chg)
-            charges = load_charges(args.chg)
+            file_args.chg = path.join(original_dir, file_args.chg)
+            charges = load_charges(file_args.chg)
             charges = np.reshape(charges, (pdb.getNumFrames(), pdb.topology.getNumAtoms()))
             info = create_amber_files(pdb, outfile=outfile, net_charge=opts.charge, irstrnt=2, init_charges=charges)
             call_resp(outfile=outfile, n_stages=1, qinit_file='q_init')
@@ -572,4 +580,15 @@ if __name__ == '__main__':
     final_dir_name = path.abspath(path.join(path.curdir, opts.name + "_resp"))
     os.rename(scratch_dir, final_dir_name)
     
-    
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-ipt', required=False)
+    parser.add_argument('-pdb', required=False)
+    parser.add_argument('-out', required=False)
+    parser.add_argument('-esp', required=False)
+    parser.add_argument('-chg', required=False)
+    parser.add_argument('-mol', required=True)
+    parser.add_argument('-pts', required=False)
+    args = parser.parse_args()
+
+    main(args)

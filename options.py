@@ -31,7 +31,7 @@ class Options():
         self.nh_dens = 1
         self.fitting_method = 'slsqp'
 
-        #   keywords that need to be converted to types other than strings
+        #   keywords that need to be converted to types
         self._keywords = {}
         self._keywords['charge'         ] = int
         self._keywords['optimize'       ] = strtobool
